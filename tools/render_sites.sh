@@ -17,7 +17,7 @@ cp assets-src/story/index.html assets/story/index.html
 cp assets-src/www/index.html assets/www/index.html
 cp assets-src/error/404.html assets/error/404.html
 cp assets-src/error/403.html assets/error/403.html
-cp assets-src/wifi assets/wifi
+cp -r assets-src/wifi assets/wifi
 
 cd assets-src/blog
 mkdocs build -d ../../assets/blog

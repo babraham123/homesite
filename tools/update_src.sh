@@ -19,7 +19,7 @@ npx @divriots/jampack /root/homesite-rendered
 
 # Copy the rendered site to the server
 cd /root
-scp -r homesite-rendered "$user@websvcs.$url:/home/$user"
+scp -qr homesite-rendered "$user@websvcs.$url:/home/$user"
 echo "websvcs root password:"
 ssh -t "$user@websvcs.$url" '
 sudo chown -R root:root homesite-rendered

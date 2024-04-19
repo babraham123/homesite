@@ -15,4 +15,12 @@ vars.template.yml
 node_modules
 package.json
 package-lock.json
+
+# Invalid types
 assets
+*.ico
+*.png
+*jpg
+*jpeg
+*.gif
+*.svg

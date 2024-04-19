@@ -16,6 +16,5 @@ site:
   name: "JD's System"
   email: "jdoe2@gmail.com"
 repo: "https://github.com/babraham123/homelab"
-web_repo: "https://github.com/babraham123/homesite"
+webrepo: "https://github.com/babraham123/homesite"
 ...
-
