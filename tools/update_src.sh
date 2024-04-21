@@ -16,6 +16,7 @@ cd /root/homesite-rendered
 tools/render_sites.sh
 npm ci
 npx @divriots/jampack /root/homesite-rendered
+rm -rf node_modules package.json package-lock.json _jampack
 
 # Copy the rendered site to the server
 cd /root
@@ -28,5 +29,5 @@ sudo mv homesite-rendered /root/homesite-rendered
 
 sudo mkdir -p /var/opt/nginx/www
 sudo rm -rf /var/opt/nginx/www/*
-sudo mv /root/homesite-rendered/assets/* /var/opt/nginx/www
+sudo cp -r /root/homesite-rendered/assets/* /var/opt/nginx/www
 '

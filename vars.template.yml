@@ -1,7 +1,7 @@
 ---
 personal:
   name: "Jane Doe"
-  email: "jdoe@gmail.com"
+  email: "jdoe@example.com"
   phone: "1-123-456-7890"
   linkedin: "https://www.linkedin.com/in/janedoe/"
   github: "https://github.com/janedoe/"
@@ -14,7 +14,7 @@ username: "jdoe"
 site:
   url: "janedoe.com"
   name: "JD's System"
-  email: "jdoe2@gmail.com"
+  email: "jdoe2@example.com"
 repo: "https://github.com/babraham123/homelab"
 webrepo: "https://github.com/babraham123/homesite"
 ...
