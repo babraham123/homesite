@@ -7,12 +7,6 @@ sudo su
 cd /root
 apt install -y fd-find python3-pip git
 pip3 install --break-system-packages mkdocs-material jinjanator
-
-# installs nvm, node and npm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install 20
-node -v
-npm -v
 ```
 
 - Install yq
@@ -35,9 +29,10 @@ rm -rf dart-sass
 
 ## Render source
 ```bash
+ssh-copy-id {{ username }}@websvcs.{{ site.url }}
 git clone {{ webrepo }} homesite
 cd homesite
 # Fill in personal details based on vars.template.yml
 vim vars.yml
-tools/update_src.sh
+tools/deploy_src.sh
 ```
