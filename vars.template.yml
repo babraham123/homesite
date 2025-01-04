@@ -2,7 +2,6 @@
 personal:
   name: "Jane Doe"
   email: "jdoe@example.com"
-  phone: "1-123-456-7890"
   linkedin: "https://www.linkedin.com/in/janedoe/"
   github: "https://github.com/janedoe/"
   attributes:
