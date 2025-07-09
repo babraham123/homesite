@@ -1,0 +1,65 @@
+# Ref: 
+#   https://www.mkdocs.org/getting-started/
+#   https://squidfunk.github.io/mkdocs-material/creating-your-site/
+site_name: Bket's Homelab
+site_url: https://bket.net/
+
+theme:
+  name: material
+  logo: img/favicon.ico
+  features:
+    - search.suggest
+    - search.highlight
+    - search.share
+    - navigation.tracking
+    - navigation.sections
+    - navigation.path
+    - toc.follow
+    - toc.integrate
+
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default 
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+      primary: teal
+      accent: teal
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+      primary: indigo
+      accent: indigo
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Blog:
+    - blog/index.md
+
+plugins:
+  - search
+  - offline
+  - blog
+  - optimize
+  - meta
+  - social:
+    cards_layout: default
+  - rss:
+      match_path: blog/posts/.* 
+      date_from_meta:
+        as_creation: date
+      categories:
+        - categories
+      comments_path: "#__comments"
