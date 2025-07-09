@@ -1,6 +1,7 @@
 # Ref: 
 #   https://www.mkdocs.org/getting-started/
 #   https://squidfunk.github.io/mkdocs-material/creating-your-site/
+---
 site_name: Bket's Homelab
 site_url: https://bket.net/
 
@@ -46,16 +47,14 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Blog:
-    - blog/index.md
+      - blog/index.md
 
 plugins:
   - search
   - offline
   - blog
-  - optimize
-  - meta
   - social:
-    cards_layout: default
+      cards_layout: default
   - rss:
       match_path: blog/posts/.* 
       date_from_meta:
@@ -63,3 +62,4 @@ plugins:
       categories:
         - categories
       comments_path: "#__comments"
+...
