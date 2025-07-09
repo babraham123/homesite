@@ -1,0 +1,60 @@
+<!-- ref: https://isso-comments.de/docs/reference/client-config/ -->
+<!-- ref: https://github.com/squidfunk/mkdocs-material/issues/1466 -->
+{% if page.meta.comments %}
+  <h2 id="__comments">{{ lang.t("meta.comments") }}</h2>
+  <!-- Insert generated snippet here -->
+  <script data-isso="/homesite/"
+    data-isso-css="true"
+    data-isso-css-url="{api-endpoint}/css/isso.css"
+    data-isso-lang="en"
+    data-isso-max-comments-top="10"
+    data-isso-max-comments-nested="5"
+    data-isso-reveal-on-click="5"
+    data-isso-sorting="newest"
+    data-isso-avatar="true"
+    data-isso-avatar-bg="#f0f0f0"
+    data-isso-avatar-fg="#9abf88 #5698c4 #e279a3 #9163b6 #be5168 #f19670 #e4bf80 #447c69"
+    data-isso-vote="true"
+    data-isso-vote-levels="null"
+    data-isso-page-author-hashes="null"
+    data-isso-reply-notifications-default-enabled="false"
+    data-isso-sorting="oldest"
+    src="https://comment.bket.net/homesite/js/embed.min.js">
+  </script>
+
+  <!-- Synchronize Isso theme with palette -->
+  <!-- <script>
+    var isso = document.querySelector("script[src*=isso]")
+
+    // Set palette on initial load
+    var palette = __md_get("__palette")
+    if (palette && typeof palette.color === "object") {
+      var theme = palette.color.scheme === "slate"
+        ? "transparent_dark"
+        : "light"
+
+      // Instruct Isso to set theme
+      isso.setAttribute("data-theme", theme) 
+    }
+
+    // Register event handlers after documented loaded
+    document.addEventListener("DOMContentLoaded", function() {
+      var ref = document.querySelector("[data-md-component=palette]")
+      ref.addEventListener("change", function() {
+        var palette = __md_get("__palette")
+        if (palette && typeof palette.color === "object") {
+          var theme = palette.color.scheme === "slate"
+            ? "transparent_dark"
+            : "light"
+
+          // Instruct Isso to change theme
+          var frame = document.querySelector(".isso-frame")
+          frame.contentWindow.postMessage(
+            { isso: { setConfig: { theme } } },
+            "https://comment.bket.net/homesite"
+          )
+        }
+      })
+    })
+  </script> -->
+{% endif %}

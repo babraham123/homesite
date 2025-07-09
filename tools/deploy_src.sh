@@ -7,32 +7,25 @@
 
 set -euo pipefail
 
-project_dir=/tmp/homesite-rendered
 host="websvcs"
-user=$(yq ".username" vars.yml)
-url=$(yq ".site.url" vars.yml)
+url="bket.net"
+user="babraham"
 
-tools/render_src.sh "$project_dir"
-
-pushd "$project_dir"
-tools/render_sites.sh
-popd
+tools/render_src.sh
 
 if ! ping -c3 -W3 "$host.$url" > /dev/null; then
   echo "error: $host is not reachable" >&2
   return
 fi
 # Copy the rendered site to the server
-scp -qr -o LogLevel=QUIET "$project_dir" "$user@$host.$url:/home/$user"
+scp -qr -o LogLevel=QUIET assets "$user@$host.$url:/home/$user"
 echo "$host root password:"
 ssh -t "$user@$host.$url" '
-sudo chown -R root:root homesite-rendered
-sudo rm -rf /root/homesite-rendered
-sudo mv homesite-rendered /root/homesite-rendered
-
+sudo chown -R root:root assets
 sudo mkdir -p /var/opt/nginx/www
 sudo rm -rf /var/opt/nginx/www/*
-sudo ls /root/homesite-rendered/assets | xargs -I% sudo cp -r /root/homesite-rendered/assets/% /var/opt/nginx/www
+sudo cp -r /home/babraham/assets/* /var/opt/nginx/www
+sudo rm -rf /home/babraham/assets
 '
 
-rm -rf "$project_dir"
+echo "Deployed the site to $host.$url"
