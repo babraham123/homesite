@@ -1,6 +1,7 @@
 ---
-draft: true 
-date: 2025-07-08 
+draft: true
+date: 2025-07-08
+comments: true
 categories:
   - overview
 ---
