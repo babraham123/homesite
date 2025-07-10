@@ -2,9 +2,9 @@
 
 ## Install tools
 ```bash
-pip3 install mkdocs-material
-pip3 install "mkdocs-material[imaging]"
+pip install mkdocs-material "mkdocs-material[imaging]" mkdocstrings mkdocs-rss-plugin
 brew install cairo freetype libffi libjpeg libpng zlib pngquant
+brew link expat --force
 
 git clone https://github.com/babraham123/homesite
 ```

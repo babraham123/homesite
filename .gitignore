@@ -8,5 +8,7 @@ crash.*.log
 # Node files
 node_modules
 
+# mkdocs
 !assets/.keep
 assets/*
+.cache
