@@ -1,4 +1,4 @@
-# Welcome to my homelab
+# Overview
 
 Configuration and bootstrapping scripts for a local, private cloud (aka a homelab). The goal is to create a zero-trust environment to serve web apps, manage media and work on tech projects. I strongly prioritized open source and self hosted software. High availability and automatic provisioning are non-goals given the scale of the system.
 

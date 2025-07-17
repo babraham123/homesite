@@ -1,0 +1,20 @@
+# Ref: https://lukasgeiter.github.io/mkdocs-awesome-nav/reference/
+
+nav:
+  - Home: index.md
+  - Blog: blog/index.md
+  - "*"
+
+sort:
+  direction: asc
+  type: natural
+  by: filename
+  sections: last
+  ignore_case: true
+
+# title: Lorem Ipsum
+# flatten_single_child_sections: true
+# preserve_directory_names: true
+# hide: true
+# ignore: "*.hidden.md"
+# append_unmatched: true

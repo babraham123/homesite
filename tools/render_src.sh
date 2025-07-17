@@ -5,9 +5,9 @@
 #   cd ~/project/dir
 #   tools/render_src.sh
 
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:$PKG_CONFIG_PATH"
-export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
-export DYLD_LIBRARY_PATH="/usr/local/lib:/opt/homebrew/lib:$DYLD_LIBRARY_PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+export DYLD_LIBRARY_PATH="/opt/homebrew/lib:/usr/local/lib:$DYLD_LIBRARY_PATH"
 
 set -euo pipefail
 
