@@ -2,7 +2,7 @@
 #   https://www.mkdocs.org/getting-started/
 #   https://squidfunk.github.io/mkdocs-material/creating-your-site/
 ---
-site_name: Bket's Homelab
+site_name: Bket's Tech Musings
 site_url: https://bket.net/
 
 theme:
@@ -43,17 +43,12 @@ theme:
       primary: indigo
       accent: indigo
 
-nav:
-  - Home: index.md
-  - Homelab: homelab/index.md
-  - Blog:
-      - blog/index.md
-
 plugins:
   - search
   - offline
   - blog
   - social
+  - awesome-nav
   - rss:
       match_path: blog/posts/.* 
       date_from_meta:
