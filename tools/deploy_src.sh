@@ -9,7 +9,7 @@ set -euo pipefail
 
 host="websvcs"
 url="bket.net"
-user="babraham"
+user="manualadmin"
 
 tools/render_src.sh
 
@@ -24,8 +24,8 @@ ssh -t "$user@$host.$url" '
 sudo chown -R root:root assets
 sudo mkdir -p /var/opt/nginx/www
 sudo rm -rf /var/opt/nginx/www/*
-sudo cp -r /home/babraham/assets/* /var/opt/nginx/www
-sudo rm -rf /home/babraham/assets
+sudo cp -r assets/* /var/opt/nginx/www
+sudo rm -rf assets
 '
 
 echo "Deployed the site to $host.$url"
