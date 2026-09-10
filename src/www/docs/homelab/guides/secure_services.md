@@ -21,19 +21,23 @@ src/secsvcs/install_svcs.sh grafana
 src/secsvcs/install_svcs.sh ntfy
 src/secsvcs/install_svcs.sh ntfy-alertmanager
 # src/secsvcs/install_svcs.sh vault
+src/secsvcs/install_svcs.sh olive_tin
 src/secsvcs/install_svcs.sh fluentbit
 
 systemctl restart node_exporter
+systemctl restart mdns_repeater
+systemctl list-units | grep Homelab
 ```
 
 ## Networking
 - Enable LAN access to postgres, lldap, authelia and ntfy smtp
 ```bash
-NET_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
+POD_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
+NET_IFACE=$(ip -j -4 route show to default | jq -r '.[0].dev')
 
-ufw allow in from 192.168.2.20 to any port 5432,6360,9091,465 proto tcp
 ufw allow in from 192.168.4.21 to any port 5432,6360,9091,465 proto tcp
-ufw route allow in on enp6s18 out on $NET_IFACE to any port 5432,6360,9091,465 proto tcp
+ufw allow in from 192.168.2.20 to any port 5432,6360,9091,465 proto tcp
+ufw route allow in on $NET_IFACE out on $POD_IFACE to any port 5432,6360,9091,465 proto tcp
 ```
 
 - Confirm that the logs for traefik, authelia and lldap look good 
@@ -51,15 +55,10 @@ journalctl -eu authelia
     `/usr/local/bin/get_secret.sh lldap_admin_password`
   - Add regular users, add them to the `lldap_password_manager` group
     - jane, jayden, jasper,  (note for future: add_more_users)
-  - Create the `authelia_gen_access` group, add users to it
+  - Create the `authelia_gen_access`, `headscale_access` and `command_general` groups, add users to them
+  - Create the `grafana_admin`, `hass_admin` and `command_admin` groups, add your user to it
   - Uncomment out the authelia middleware
     `vim /etc/opt/traefik/config/dynamic/traefik.yml`
-
-  - Create robot users (Not currently used, ignore for now. Prefer OIDC client)
-    - Use `jdoe+USER@gmail.com` for the email.
-    - Use the stored password:
-      `/usr/local/bin/get_secret.sh USER_lldap_password`
-    - Add the new user to the `lldap_strict_readonly` group
 
 - Confirm that authelia is working, open https://auth.janedoe.com
 
@@ -91,7 +90,7 @@ exit
 ```
 - Record access token as a secret on pve1
 ```bash
-ssh jdoe@pve1.janedoe.com
+ssh manualadmin@pve1
 sudo su
 /root/homelab-rendered/src/pve1/secret_update.sh secsvcs
 /root/homelab-rendered/src/pve1/secret_update.sh websvcs
@@ -118,4 +117,55 @@ ls /run/systemd/generator/
 ```
 systemctl list-unit-files
 systemctl --type=service
+```
+
+## Upgrade Postgres
+[Why upgrade](https://why-upgrade.depesz.com/)
+
+- Backup the DB instance
+```bash
+sudo su
+cd /root/backups
+systemctl list-units | grep Homelab
+# Stop all other homelab services in reserve order of installation
+systemctl stop ALL_OTHER_SERVICES
+container=$(podman container ls | grep postgres | awk '{print $1}')
+now=$(date -I)
+podman exec -it --user 70 "$container" pg_dumpall -U postgres --clean --if-exists > pgdump-$now.sql
+gzip *.sql
+systemctl stop postgres
+```
+- Upgrade and restore from backup
+```bash
+cd /root/backups
+src/secsvcs/install_svcs.sh postgres
+gunzip FILE.sql.gz
+container=$(podman container ls | grep postgres | awk '{print $1}')
+podman exec -it --user 70 "$container" psql -U postgres < FILE.sql
+systemctl start ALL_OTHER_SERVICES
+```
+
+## Backup Victoriametrics
+[Ref](https://docs.victoriametrics.com/vmbackup/)
+
+- Backup
+  - TODO: fix the 401 returned by VM
+```bash
+sudo su
+mkdir /root/backups/metrics
+podman run --replace -it --name=vmbackup \
+  --network=systemd-net -v /root/backups/metrics:/backup -v systemd-vmdata:/data \
+  --secret victoriametrics_admin_password,type=env,target=httpAuth_password \
+  docker.io/victoriametrics/vmbackup:latest \
+  -envflag.enable -httpAuth.username="admin" -storageDataPath=/data -snapshot.createURL=http://metrics.janedoe.com:8428/snapshot/create -dst=fs:///backup
+```
+
+- Restore
+```bash
+systemctl stop victoriametrics
+podman run --replace -it --name=vmrestore \
+  -v /root/backups/metrics:/backup -v systemd-vmdata:/data \
+  docker.io/victoriametrics/vmrestore:latest \
+  -storageDataPath=/data -src=fs:///backup
+systemctl start victoriametrics
 ```

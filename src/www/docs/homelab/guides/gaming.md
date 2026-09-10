@@ -1,33 +1,42 @@
 # Gaming setup
 Guide to stream games from the windows VM to my living room TV.
+First stand up the [Windows VM](./vm_windows.md)
 
-- First stand up the [Windows VM](./vm_windows.md)
-- And the [Raspberry Pi](./rpi.md) client for the TV
+## Streaming
 
 ### Windows streaming server and game platforms
 - Install [ViGEmBus](https://github.com/ViGEm/ViGEmBus)
 - Install [Playnite](https://playnite.link/)
 - Install [ChangeScreenResolution.exe](https://tools.taubenkorb.at/change-screen-resolution/)
 - Install [Sunshine](https://docs.lizardbyte.dev/projects/sunshine/en/latest/about/installation.html)
-  - Add Playnite as a cmd: `"C:\Users\jdoe\AppData\Local\Playnite\Playnite.FullscreenApp.exe" --hidesplashscreen`
+  - Add Playnite as a cmd: `"C:\Users\admin\AppData\Local\Playnite\Playnite.FullscreenApp.exe" --hidesplashscreen`
   - Run PowerShell cmds:
 ```PowerShell
 cd "C:\Program Files\Sunshine\scripts"
 ./add-firewall-rule.bat
 ./install-service.bat
+# Don't start on boot
+Set-Service -Name SunshineService -StartupType Manual
 ```
 - Install [Moonlight](https://github.com/moonlight-stream/moonlight-qt/releases) on Mac, Raspberry Pi
 - Install Oculus App
   - Run as admin: `C:\Program Files\Oculus\Support\oculus-runtime\OVRServer_x64.exe`
   - Start the App
-  - [Enable mDNS reflection](./pfsense.md)
+  - [Enable mDNS reflection](./router.md)
   - On Quest 2, Settings > System > Link, enable Air link, pair with computer
 - Install Yuzu, Ryujinx
   - Download [keys](https://theprodkeys.com/yuzu-encryption-keys-are-missing/) and copy to correct folder location
   - Import into Playnite
 - Install Dolphin, import into Playnite
 
-### Raspberry Pi streaming client and controllers
+### Apple TV client
+- Install Moonlight from the App Store
+- Tweak the [settings](https://www.reddit.com/r/appletv/comments/nklgcl/any_apple_tv_4k_2021_owners_that_have_tried/)
+- Attempt to connect to the gaming VM. Open the Sunshine web UI and enter in the pairing code.
+- Pair xbox controller via bluetooth
+
+### Raspberry Pi client (not used, prefer Apple TV)
+- Stand up the [Raspberry Pi](./rpi.md) client for the TV
 - Enable HEVC, HDR
   - `vim /Volumes/bootfs/config.txt`
 ```

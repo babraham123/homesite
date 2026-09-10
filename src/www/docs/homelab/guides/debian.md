@@ -7,7 +7,7 @@ Initial setup for any Debian Linux instance. Configures the shell, ssh access an
 [Vid](https://www.youtube.com/watch?v=XEoO1FgIel4)
 - If running, temporarily stop the vm_watchdog service on PVE1.
 - Use graphical install, run through the options.
-  - Leave name blank, username: jdoe
+  - Leave name blank, username: manualadmin
   - Partition disks: Guided - use entire disk
   - All files in one partition
   - If not a desktop VM, make sure to uncheck the GUI packages.
@@ -16,13 +16,13 @@ Initial setup for any Debian Linux instance. Configures the shell, ssh access an
   - If desktop VM, open Terminal app. Otherwise login as root.
 ```bash
 apt install -y ssh sudo
-usermod -aG sudo jdoe
+usermod -aG sudo manualadmin
 ```
 
 ## Packages
 - SSH in
 ```bash
-ssh jdoe@HOSTNAME.janedoe.com
+ssh manualadmin@HOSTNAME
 sudo su
 ```
 - Fix deb repository, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/) 
@@ -30,8 +30,9 @@ sudo su
 	- add `contrib non-free non-free-firmware` to all Debian sources
 - Install basics
 ```bash
-apt update && apt upgrade
-apt install -y zsh vim iproute2 git less curl wget zip unzip ethtool jq unattended-upgrades ufw
+apt update
+apt upgrade
+apt install -y zsh vim iproute2 git less curl wget zip unzip ethtool jq unattended-upgrades ufw screen
 chsh -s /bin/zsh
 
 # enable firewall
@@ -53,11 +54,11 @@ ufw enable
 ```
 PermitRootLogin no
 ```
-- Generate SSH key, set correct SUBDOMAIN
+- Generate SSH key
 ```bash
 exit
 cd ~
-ssh-keygen -t ed25519 -C "jdoe@SUBDOMAIN.janedoe.com"
+ssh-keygen -t ed25519 -C "manualadmin@$(hostname).janedoe.com"
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519
 ```
@@ -101,8 +102,80 @@ plugins=(zsh-autosuggestions zsh-syntax-highlighting git)
 - Install the homelab source code
 ```bash
 exit
-# From your local device
-ssh-copy-id jdoe@SUBDOMAIN.janedoe.com
+# From your local machine
 tools/render_src.sh /tmp/homelab-rendered
 tools/upload_src.sh SUBDOMAIN /tmp/homelab-rendered
 ```
+
+## Automation
+- Create user and setup SSH
+```bash
+# Create user
+ssh manualadmin@SUBDOMAIN
+sudo su
+adduser autoadmin
+usermod -aG sudo autoadmin
+su - autoadmin
+# Create and add key
+ssh-keygen -t ed25519 -C "autoadmin@$(hostname).janedoe.com"
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+exit
+# Install configs
+/root/homelab-rendered/src/debian/commands.sh install_dispatcher
+```
+
+## Backups
+- Setup a destination
+```bash
+mkdir /root/backups
+chmod 700 /root/backups
+```
+
+## Upgrade to Trixie (for reference)
+```bash
+sudo su
+screen
+# Ensure >10GB, >800MB free disk space
+df -h /
+df -h /boot
+# Stop all homelab services
+systemctl list-units | grep Homelab
+systemctl stop ALL_SERVICES
+
+apt update
+apt dist-upgrade
+sed -i 's/bookworm/trixie/g' /etc/apt/sources.list
+sed -i -e 's/bookworm/trixie/g' /etc/apt/sources.list.d/*.list
+# If podman, reinstall apt sources
+curl -fsSL https://download.opensuse.org/repositories/home:/alvistack/Debian_13/Release.key \
+  | gpg --dearmor \
+  | tee /etc/apt/trusted.gpg.d/alvistack.gpg > /dev/null
+echo "deb http://downloadcontent.opensuse.org/repositories/home:/alvistack/Debian_13/ /" \
+  | tee /etc/apt/sources.list.d/alvistack.list > /dev/null
+
+apt update
+apt dist-upgrade
+# Re-apply config changes
+vim /etc/ssh/sshd_config
+vim /etc/apt/apt.conf.d/50unattended-upgrades
+# Confirm that the network interface won't change
+ip a
+udevadm test-builtin net_setup_link /sys/class/net/enp6s18 2>/dev/null
+sed -i 's/enp6s18/ens18/g' /etc/network/interfaces
+reboot
+
+# May need to remove old dhcp leases
+# log on to root via console
+dhclient -r enp6s18
+dhclient -r ens18
+rm /var/lib/dhcp/dhclient*
+dhclient ens18
+
+# ssh should now work
+sudo su
+apt modernize-sources
+apt update
+apt upgrade
+```
+- If the interface name changes, recreate the ufw rules

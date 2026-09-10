@@ -39,7 +39,7 @@ exit
 
 ```bash
 rm -r temp
-ssh root@homesvcs.janedoe.com -p 22222
+ssh root@homesvcs -p 22222
 passwd root
 dnf install openssh-server
 systemctl enable sshd
