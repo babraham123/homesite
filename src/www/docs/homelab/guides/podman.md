@@ -9,8 +9,8 @@ Initial setup to install Proxmox and configure it with the relevant scripts and 
 - Install dependencies
 ```bash
 sudo su
-apt install -y age jq python3-pip
-pip3 install --break-system-packages jinjanator jinjanator-plugin-ansible passlib
+apt install -y age jq python3-pip gnupg2
+pip3 install --break-system-packages jinjanator jinjanator-plugin-ansible passlib "bcrypt==4.0.1"
 
 YQ_VERSION=$(curl -s "https://api.github.com/repos/mikefarah/yq/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+')
 wget "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64.tar.gz" -O - | tar xz
@@ -30,7 +30,7 @@ echo "deb http://downloadcontent.opensuse.org/repositories/home:/alvistack/Debia
 
 apt update
 apt -y upgrade
-apt -y install podman podman-netavark podman-aardvark-dns podman-compose libgpgme11-dev buildah libyajl2
+apt -y install podman podman-netavark podman-aardvark-dns podman-compose libgpgme11-dev buildah libyajl2 uidmap
 ```
 
 - Enable container auto updating
@@ -52,9 +52,9 @@ mkdir /etc/containers/systemd
 cp src/$HOST/net.network /etc/containers/systemd
 systemctl daemon-reload
 systemctl start net-network
-NET_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
-# Use enp6s18 on secsvcs, enp6s18 on websvcs, enp6s18 on homesvcs
-ufw route allow in on enp6s18 out on $NET_IFACE to any port 80,443 proto tcp
+POD_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
+NET_IFACE=$(ip -j -4 route show to default | jq -r '.[0].dev')
+ufw route allow in on $NET_IFACE out on $POD_IFACE to any port 80,443 proto tcp
 
 ufw enable
 ```
@@ -67,22 +67,16 @@ sudo su
 # Read secrets from age-encrypted file
 mkdir -p /etc/opt/secrets
 chmod 700 /etc/opt/secrets
-cp /home/jdoe/.ssh/id_ed25519* /etc/opt/secrets
+cp /home/manualadmin/.ssh/id_ed25519* /etc/opt/secrets
 chmod 600 /etc/opt/secrets/*
 cd /root/homelab-rendered
 cp src/podman/*.sh /usr/local/bin
 cp src/podman/containers.conf /etc/containers
-
-echo "placeholder" > /root/placeholder.txt
-podman secret rm --all
-/usr/local/bin/list_secrets.sh | xargs -I% podman secret create "%" /root/placeholder.txt
-podman secret ls
 ```
 
 ## mDNS
 - Install dependencies and service
 ```bash
-apt install -y build-essential
 src/debian/install_svcs.sh mdns_repeater
 ```
 
@@ -100,4 +94,43 @@ src/debian/install_svcs.sh node_exporter
 ```bash
 # Use 10.10.0.7 on secsvcs, 10.11.0.7 on websvcs, 10.12.0.7 on homesvcs
 ufw allow in from 10.10.0.7 to any port 9100 proto tcp
+```
+
+## Backups
+TODO: turn into a script
+
+- Backup container volumes
+```bash
+cd /root/backups
+systemctl list-units | grep Homelab
+# Stop all homelab services in reserve order of installation
+systemctl stop ALL_SERVICES
+# Archive the relevant volumes
+now=$(date -I)
+podman volume ls --format json | jq -r '.[].Name' | \
+  xargs -I% podman volume export % -o %-$now.tar
+gzip *.tar
+# Restart all homelab services in order of installation
+systemctl start ALL_SERVICES
+```
+
+- Restore a container volume
+```bash
+cd /root/backups
+systemctl stop ALL_SERVICES
+gunzip FILE.tar.gz
+podman volume import VOLUME FILE.tar
+systemctl start ALL_SERVICES
+```
+
+- Backup a container image
+```bash
+cd /root/backups
+podman images --format=json | \
+  jq -r '.[].Names.[0]' | tr '/' '#' | \
+  xargs -I% podman save -o %.tar %
+gzip *.tar
+
+gunzip FILE.tar.gz
+podman load -i IMAGE-NAME.tar
 ```

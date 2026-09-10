@@ -26,8 +26,8 @@ iface enp2s0 inet dhcp
 - Add proxmox repo, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/)
   - `sudo nano /etc/apt/sources.list.d/pve-enterprise.list`
 ```
-#deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise
-deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription
+#deb https://enterprise.proxmox.com/debian/pve trixie pve-enterprise
+deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
 ```
 - Install desktop env, [src](https://pve.proxmox.com/wiki/Developer_Workstations_with_Proxmox_VE_and_X11)
 ```bash
@@ -35,15 +35,17 @@ sudo su
 rm /etc/apt/sources.list.d/ceph.list
 apt update && apt upgrade
 apt install -y xfce4 chromium lightdm sudo ufw
-adduser jdoe
-usermod -aG sudo jdoe
+adduser manualadmin
+usermod -aG sudo manualadmin
 ip addr
 systemctl start lightdm
 # login, reboot
 ```
 - Basic [debian setup](./debian.md)
 
-## Install pfSense
+## pfSense basic setup
+
+### Install pfSense
 - Connect to pve console: https://HOST_IP_ADDR:8006/
 - Upload pfSense ISO using USB, [src](https://www.virtualizationhowto.com/2022/08/pfsense-proxmox-install-process-and-configuration/)
 - Create VM
@@ -51,35 +53,37 @@ systemctl start lightdm
   - startup order 1, ssd emulation, discard=1, cache=none
 - Enable IOMMU / NIC passthrough, [src](https://www.servethehome.com/how-to-pass-through-pcie-nics-with-proxmox-ve-on-intel-and-amd/)
   - BIOS >> Advanced >> CPU Configuration >> VMX >> Enabled
-`efibootmgr -v` # is grub or systemd
-`nano /etc/default/grub`
+  - `efibootmgr -v` # is grub or systemd
+  - `nano /etc/default/grub`
 ```
 GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_iommu=on iommu=pt"
 ```
-`update-grub && reboot`
-`nano /etc/modules`
+  - `update-grub && reboot`
+  - `nano /etc/modules`
 ```
 vfio
 vfio_iommu_type1
 vfio_pci
 vfio_virqfd
 ```
+- Check that the drivers are loaded
 ```bash
 reboot
 dmesg | grep -e DMAR -e IOMMU | grep able
 dmesg | grep remapping
 lspci
 ```
-- Add passed thru NICs to VM, via [PCI passthru](https://pve.proxmox.com/wiki/PCI(e)_Passthrough)
+- Add passed thru NICs to VM, via [PCI passthrough](https://pve.proxmox.com/wiki/PCI(e)_Passthrough)
   - VM >> Hardware >> Add >> PCI Device >> Raw Device >> [pick hw id]
   - `lspci -nn -vvv | grep Ethernet` # get hw id
 - Pass in a bridge iface as Network Device (see below)
 - Plug eth0 into modem, eth1 to WiFi AP
 - Start VM and run thru pfSense install via Console, [src](https://www.virtualizationhowto.com/2022/08/pfsense-proxmox-install-process-and-configuration/)
   - UFS, GPT
-  - Assign Interfaces: WAN=igc0, LAN=igc1, rest as optional
-  - Optional: Set Interface IPs (LAN)
+  - Assign Interfaces: WAN=igc0, LAN=igc1, LAN2=igc3, rest as optional
+  - Set LAN Interface IPs
     - `192.168.1.[100 - 200]/24`
+    - `192.168.3.[100 - 200]/24`
 - Log into pfSense GUI
   - Connect eth1 (LAN) directly to laptop
   - Connect to admin console via LAN ip address (192.168.1.1)
@@ -97,16 +101,29 @@ lspci
   - Disabled IPv6 and DNSSEC (for now) 
 - Enable auto backup (ACB)
 
+### Add an interface
+TODO: integrate these instructions with above
+- Go to Interfaces >> Assignments >> Add
+- Go to Interface >> OPT4
+  - Enable, Description = LAN2
+  - IPv4 Configuration Type = Static IPv4
+  - IPv4 Address = 192.168.3.0/24
+- Go to Services >> DHCP Server >> LAN2
+  - Enable, Address Pool Range is 192.168.3.100 - 200
+- Go to Firewall >> Rules. Copy existing rules from LAN
+- Go to Services >> mDNS Bridge. Add LAN2
+- Go to Services >> DNS Resolver >> Network Interfaces. Add LAN2
+- Reboot the pfSense VM
+
 ### QEMU Agent
 [ref](https://forum.netgate.com/topic/162083/pfsense-vm-on-proxmox-qemu-agent-installation/6)
 - Go to System >> Advanced >> Admin Access >> Secure Shell
   - Check Enable Secure Shell
 - Install and enable agent
 ```bash
-ssh admin@router.janedoe.com
-pkg install -y qemu-guest-agent
-sysrc qemu_guest_agent_enable="YES"
-service qemu-guest-agent start
+ssh admin@router
+fetch https://raw.githubusercontent.com/Weehooey/pfSense-scripts/refs/heads/main/install-qemu-guest-agent.sh
+sh install-qemu-guest-agent.sh
 ```
 
 ### System Patches
@@ -143,6 +160,7 @@ Improve latency when under heavy load
 ### Custom subdomains
 - Go to Services >> DNS Resolver
 - Add host overrides
+- Under Network Interfaces, select all the local ones. Exclude WAN and the "IPv6 Link-Local" ones.
 - On your computer (MacOS), go to Settings >> Network >> Wi-Fi >> Details >> DNS
   - Delete the old DNS Servers
   - Add 192.168.1.1, 1.1.1.1 (Chrome only uses 8.8.8.8 if it's present in the list)
@@ -151,13 +169,13 @@ Improve latency when under heavy load
 For local-only overrides of existing routes
 - Go to Services >> DNS Resolver
 - Set "System Domain Local Zone Type" to "Redirect"
-- Paste `unbound.conf` into "Custom options"
+- Paste `src/dns/unbound.conf` into "Custom options"
 
-### Automations
+### Certificate
 - Setup cert import
 ```bash
 wget https://raw.githubusercontent.com/stompro/pfsense-import-certificate/master/pfsense-import-certificate.php
-scp pfsense-import-certificate.php admin@router.janedoe.com:/root
+scp pfsense-import-certificate.php admin@router:/root
 rm pfsense-import-certificate.php
 ```
   - Remove the default cert
@@ -178,39 +196,99 @@ pkg-static add https://github.com/jaredhendrickson13/pfsense-api/releases/latest
   - Select all the available interfaces
   - Save
 
-### Ad Block
-[ref](https://www.youtube.com/watch?v=xizAeAqYde4)
-- Go to System >> Package Manager
-- Install the pfBlockerNG-devel package
-- Go to Firewall >> pfBlockerNG
-- Run thru wizard
-  - inbound interface = internet facing, outbound = internal LAN ones
-  - Ensure the VIP Address does not lie within any networks
-- Geo data:
-  - Register for a MaxMind acct
-  - Go to IP, add license key and account id
-- Go to DNSBL
-  - Set DNSBL Mode to "Unbound python mode"
-  - Enable Wildcard Blocking (TLD)
-  - Disable DNS Reply Logging
-  - Go to DNSBL Groups
-    - TODO ???
+### VLANs
+The goal is to divide up the WiFi interface (LAN) into 3 VLANs:
+- WiFiTrusted: 10
+- WiFiIoT: 11
+- WiFiGuest: 12
+
+Repeat these steps for each VLAN. This is similar to the "Add an interface" section above.
+- Go to Interfaces >> Assignments >> VLANs >> Add
+  - Set the parent interface to lan, the VLAN tag to the ID # and the description to the VLAN name.
+- Go to Interfaces >> Interface Assignments
+  - Under "Available ...", select the VLAN and click Add
+  - Click the new interface (OPT#).
+    - Enable, Description = VLAN name
+    - IPv4 Configuration Type = Static IPv4
+    - IPv4 Address has the VLAN ID in the 3rd octet (example: 192.168.10.0/24)
+- Go to Services >> DHCP Server >> VLAN name
+  - Enable, Address Pool Range is SUBNET.10 - SUBNET.254
+- Trusted only: Go to Services >> mDNS Bridge. Add WiFiTrusted
+
+Now work on the firewall rules.
+- Go to Firewall >> Aliases >> IP >> Add
+  - Name, description = RFC1918
+  - Type = Network(s)
+  - 192.168.0.0/16, 172.16.0.0/12, 10.0.0.0/8
+- Create another alias for IPv6Local, fc00::/7, fe80::/10
+- Go to Firewall >> Rules
+  - All: Copy existing rules from LAN
+  - WiFiIoT, WiFiGuest: Create the following rules
+    - Block IPv4+6 TCP WiFiIoT subnets to This Firewall (self) 443
+    - Allow IPv4+6 WiFiIoT subnets to WiFiIoT address
+    - Block IPv4 WiFiIoT subnets to RFC1918
+    - Block IPv6 WiFiIoT subnets to IPv6Local
+    - Move the default allows down here
+
+TODO: configure wired VLANs when I get a proper switch
+
+### WiFi continued
+- Open the admin console: `http://tplinkeap.net/` while on one of the trusted SSIDs.
+- Create SSIDs for each of the new VLANs
+  - Go to Wireless >> Wireless Settings
+    - machines - disable broadcast
+    - welcome - enable guest
+- Assign the SSIDs to VLANs. For now omit the one you're currently connected to.
+  - Go to Wireless >> VLAN. Enable and set the VLAN ID
+- Enable admin console access
+  - Go to Management >> Management Access >> Management VLAN
+  - Enable on VLAN ID 10
+  - Connect to the other trusted SSID and refresh the page
+- Assign the previous trusted SSID to the trusted VLAN
+- Backup
 
 ## PVE1 remaining setup
-Execute the following sections from the [proxmox guide](./proxmox.md):
+Do the following sections from the [proxmox guide](./proxmox.md):
 - VM Management
 - Networking
 - Monitoring
 
+## Automation
+Create a mechanism to programmatic execute commands remotely
+- Install the homelab source code
+```bash
+# From your local machine
+tools/render_src.sh /tmp/homelab-rendered
+tools/upload_src.sh router /tmp/homelab-rendered
+```
+- Create autoadmin user
+  - Go to System >> User Manager >> Add
+  - Username = autoadmin, Password
+  - Add Privileges
+    - User - System: Shell account access
+    - User - Config: Deny Config Write
+- Enable key based access
+```bash
+ssh admin@router
+pkg install sudo
+
+/root/router-src/commands.sh install_dispatcher
+```
+
 ## Monitoring
 Upload to Victoria Metrics:
 - Get the metrics admin password from secsvcs
-  `/usr/local/bin/get_secret.sh victoriametrics_admin_password`
+```bash
+ssh manualadmin@secsvcs
+sudo /usr/local/bin/get_secret.sh victoriametrics_admin_password
+exit
+```
 - Install the plugins
 ```bash
-cd src/pfsense/plugins
-chmod 555 telegraf_*
-scp telegraf_* admin@router.janedoe.com:/usr/local/bin
+ssh admin@router
+cd /root/router-src/plugins
+cp telegraf_* /usr/local/bin
+chmod 555 /usr/local/bin/telegraf_*
 ```
 - Go to System >> Package Manager
 - Install the Telegraf package
@@ -224,7 +302,7 @@ Monitor traffic flows, [ref](https://www.youtube.com/watch?v=P8oxTUoF2Nw):
 - Install the ntopng, ntopng-data package
 - Go to Diagnostics >> ntopng Settings
 - Set ntopng Admin Password, select all interfaces
-- Use MaxMind key from above
+- Use the MaxMind license key from the pve1 secrets file
 - Leave this disabled unless you want to investigate an issue
 
 Watch for new devices:
@@ -243,8 +321,8 @@ Service Watchdog:
 ## Updates
 
 - Disable the vm_watchdog in PVE1
-```
-ssh jdoe@pve1.janedoe.com
+```bash
+ssh manualadmin@pve1
 sudo systemctl stop vm_watchdog
 sudo systemctl disable vm_watchdog
 exit
@@ -255,6 +333,20 @@ exit
 - Apply the upgrade and reboot
 - Restore the pfsense config and re-install all pkgs
 - If necessary, manual re-install pkgs
+- re-enable the vm_watchdog
+```bash
+ssh manualadmin@pve1
+sudo systemctl enable vm_watchdog
+sudo systemctl start vm_watchdog
+exit
+```
+
+## USB Ethernet adapter (optional)
+I found the USB passthru to be a little flaky, after which I would have to restart pfsense.
+
+- Do the USB Passthrough section the [proxmox guide](./proxmox.md)
+- Do additional setup if it's not autodetected, [ref](https://getlabsdone.com/how-to-fix-usb-ethernet-not-recognized-by-pfsense/)
+- Add the new interface, see above
 
 ## References
 
@@ -276,3 +368,23 @@ exit
 - https://www.servethehome.com/new-fanless-4x-2-5gbe-intel-n5105-i226-v-firewall-tested/ 
 - https://pve.proxmox.com/wiki/Pci_passthrough 
 - https://pve.proxmox.com/wiki/SPICE 
+
+### Ad Block (optional)
+I found DNS based blocking to be too limiting / finicky. Instead I now use browser extensions. 
+In case you're still interested, see [ref](https://www.youtube.com/watch?v=xizAeAqYde4)
+
+- Go to System >> Package Manager
+- Install the pfBlockerNG-devel package
+- Go to Firewall >> pfBlockerNG
+- Run thru wizard
+  - inbound interface = internet facing, outbound = internal LAN ones
+  - Ensure the VIP Address does not lie within any networks
+- Geo data:
+  - Use the MaxMind acct # and license key from the pve1 secrets file
+  - Go to IP, add license key and account id
+- Go to DNSBL
+  - Set DNSBL Mode to "Unbound python mode"
+  - Enable Wildcard Blocking (TLD)
+  - Disable DNS Reply Logging
+  - Go to DNSBL Groups
+    - TODO ???

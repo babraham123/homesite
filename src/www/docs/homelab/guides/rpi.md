@@ -47,7 +47,7 @@ sudo reboot
 
 # on Mac
 ssh-keygen -R raspberrypi.local
-ssh jdoe@SUBDOMAIN.janedoe.com
+ssh manualadmin@SUBDOMAIN
 ```
 
 ## Networking

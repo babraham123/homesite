@@ -2,8 +2,9 @@
 
 ## Install tools
 ```bash
-brew install python
-pip install mkdocs-material "mkdocs-material[imaging]" mkdocstrings mkdocs-rss-plugin mkdocs-awesome-nav
+brew install python pipx
+pipx install mkdocs
+pipx inject mkdocs mkdocs-material "mkdocs-material[imaging]" mkdocstrings mkdocs-rss-plugin mkdocs-awesome-nav
 brew install cairo freetype libffi libjpeg libpng zlib pngquant
 brew link expat --force
 
@@ -15,7 +16,7 @@ Consider creating a gravatar profile for comments: https://gravatar.com/
 ## Update the guides folder
 ```bash
 cd ../homelab
-tools/render_guides.sh ../homesite/src/www/docs/guides
+tools/render_docs.sh ../homesite/src/www/docs/homelab
 cd ../homesite
 ```
 

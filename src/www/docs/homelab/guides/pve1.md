@@ -2,25 +2,15 @@
 Initial setup for the primary VM host, PVE1. Handles the self signed CA and other certificates, secrets management, notifications and VM management services.
 
 - Make sure that [Proxmox setup](./proxmox.md) has been completed.
-- Create the secsvcs VM with the desired resources and devices attached. secsvcs holds a select group of services that have higher security and uptime requirements. All services are containerized.
-- PVE1 is the location of all user initiated actions, such as updating service configs or refreshing TLS certs.
+- Create the secsvcs, homesvcs and websvcs VMs. Configure podman on them.
+- PVE1 is where some maintenance actions occur, like refreshing TLS certs.
 
 ## Configs
-- Get access
-```bash
-sudo su
-ssh-copy-id admin@router.janedoe.com
-ssh-copy-id jdoe@pve2.janedoe.com
-ssh-copy-id jdoe@secsvcs.janedoe.com
-ssh-copy-id jdoe@websvcs.janedoe.com
-ssh-copy-id jdoe@homesvcs.janedoe.com
-ssh-copy-id jdoe@vpn.janedoe.com
-```
-
 - Install tools
 ```bash
+sudo su
 cd /root
-pip3 install --break-system-packages jinjanator jinjanator-plugin-ansible passlib
+pip3 install --break-system-packages jinjanator jinjanator-plugin-ansible passlib "bcrypt==4.0.1"
 
 # Install yq
 YQ_VERSION=$(curl -s "https://api.github.com/repos/mikefarah/yq/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+')
@@ -28,6 +18,32 @@ wget "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_
 mv yq_linux_amd64 /usr/bin/yq
 ./install-man-page.sh
 rm yq* install-man-page.sh
+```
+
+## SSH Certificates
+
+### CA certs
+[Ref](https://free-pmx.org/guides/ssh-certs/)
+- Generate the CA keys. They should be kept as secure as possible.
+```bash
+mkdir -p /root/ssh/public
+cd /root/ssh
+chmod 700 public
+
+# Include passphrase, remember it
+ssh-keygen -t ed25519 -f ca_ssh_key -C "SSH CA for janedoe.com"
+chmod 444 ca_ssh_key.pub
+chmod 400 ca_ssh_key
+
+# Leave the passphrase blank
+ssh-keygen -t ed25519 -f ca_ssh_host_key -C "SSH Host CA for janedoe.com"
+chmod 444 ca_ssh_host_key.pub
+chmod 400 ca_ssh_host_key
+
+# Wait until all of the VMs have been created. On the first run it will
+# ask you for the root password of various hosts.
+/root/homelab-rendered/src/certificates/ssh_cert_gen.sh
+# The cert for the gaming VM will be generated later
 ```
 
 ## Secrets
@@ -62,7 +78,7 @@ sops /root/secrets/pve1.yaml
 
 - Generate the SOPS/AGE secsvcs secrets file
 ```bash
-scp jdoe@secsvcs.janedoe.com:/home/jdoe/.ssh/id_ed25519.pub secsvcs_id_ed25519.pub
+scp manualadmin@secsvcs:/home/manualadmin/.ssh/id_ed25519.pub secsvcs_id_ed25519.pub
 chmod 400 secsvcs_id_ed25519.pub
 # Fill in all of the secrets you can based on `src/secsvcs/secrets_template.yaml`
 /root/homelab-rendered/src/pve1/secret_update.sh secsvcs
@@ -70,15 +86,15 @@ chmod 400 secsvcs_id_ed25519.pub
 
 - Generate the SOPS/AGE websvcs secrets file
 ```bash
-scp jdoe@websvcs.janedoe.com:/home/jdoe/.ssh/id_ed25519.pub websvcs_id_ed25519.pub
+scp manualadmin@websvcs:/home/manualadmin/.ssh/id_ed25519.pub websvcs_id_ed25519.pub
 chmod 400 websvcs_id_ed25519.pub
 # Fill in all of the secrets you can based on `src/websvcs/secrets_template.yaml`
-/root/homelab-rendered/src/pve1/secret_update.sh secsvcs
+/root/homelab-rendered/src/pve1/secret_update.sh websvcs
 ```
 
 - Generate the SOPS/AGE homesvcs secrets file
 ```bash
-scp jdoe@homesvcs.janedoe.com:/home/jdoe/.ssh/id_ed25519.pub homesvcs_id_ed25519.pub
+scp manualadmin@homesvcs:/home/manualadmin/.ssh/id_ed25519.pub homesvcs_id_ed25519.pub
 chmod 400 homesvcs_id_ed25519.pub
 # Fill in all of the secrets you can based on `src/homesvcs/secrets_template.yaml`
 /root/homelab-rendered/src/pve1/secret_update.sh homesvcs
@@ -140,12 +156,14 @@ openssl verify -CAfile certs/ca.cert.pem intermediate/certs/intermediate.cert.pe
 cat intermediate/certs/intermediate.cert.pem certs/ca.cert.pem > intermediate/certs/ca-chain.cert.pem
 chmod 444 intermediate/certs/ca-chain.cert.pem
 
-cp intermediate/certs/ca-chain.cert.pem /etc/ssl/certs/janedoe.com.ca_chain.cert.pem
-/root/homelab-rendered/src/debian/copy_to.sh pve2 intermediate/certs/ca-chain.cert.pem /etc/ssl/certs/janedoe.com.ca_chain.cert.pem
-/root/homelab-rendered/src/debian/copy_to.sh vpn intermediate/certs/ca-chain.cert.pem /etc/ssl/certs/janedoe.com.ca_chain.cert.pem
-/root/homelab-rendered/src/debian/copy_to.sh secsvcs intermediate/certs/ca-chain.cert.pem /etc/ssl/certs/janedoe.com.ca_chain.cert.pem
-/root/homelab-rendered/src/debian/copy_to.sh websvcs intermediate/certs/ca-chain.cert.pem /etc/ssl/certs/janedoe.com.ca_chain.cert.pem
-/root/homelab-rendered/src/debian/copy_to.sh homesvcs intermediate/certs/ca-chain.cert.pem /etc/ssl/certs/janedoe.com.ca_chain.cert.pem
+function upload() { scp intermediate/certs/ca-chain.cert.pem "autoadmin@${1}:/home/autoadmin"; ssh "autoadmin@${1}" "install_ca"; }
+upload pve1
+upload pve2
+upload vpn
+upload secsvcs
+upload homesvcs
+upload websvcs
+upload devtop
 ```
 
 - Example cert, normally done via gen script
@@ -165,9 +183,9 @@ openssl verify -CAfile intermediate/certs/ca-chain.cert.pem intermediate/certs/w
 ```
 
 ### Manage certs
-- Create keys
+- Create domain specific keys and certs
 ```bash
-# Wait until the services in VPN, websvcs and homesvcs are setup but not yet started
+# Wait until the services in VPN, secsvcs, websvcs and homesvcs are setup but not yet started
 /root/homelab-rendered/src/certificates/self_signed_key_gen.sh
 /root/homelab-rendered/src/certificates/self_signed_cert_gen.sh
 ```
@@ -182,11 +200,11 @@ cd /root/acme
 TCD_VERSION=$(curl -s "https://api.github.com/repos/ldez/traefik-certs-dumper/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+')
 wget "https://github.com/ldez/traefik-certs-dumper/releases/download/v${TCD_VERSION}/traefik-certs-dumper_v${TCD_VERSION}_linux_amd64.tar.gz" -O - | tar xz
 mv traefik-certs-dumper /usr/local/bin/traefik-certs-dumper
-# Wait until the services in VPN, websvcs and homesvcs are started
+# Wait until the services in VPN, secsvcs, websvcs and homesvcs are started
 /root/homelab-rendered/src/certificates/acme_transfer.sh
 ```
 
-## SMTP
+## Notifications
 - Create a custom Gmail account
 - Enable 2 Step verification
 - Generate app passwords for lldap, authelia and msmtp, [Ref](https://support.google.com/accounts/answer/185833?hl=en)
@@ -206,5 +224,5 @@ apparmor_parser -r /etc/apparmor.d/usr.bin.msmtp
 cd /root/homelab-rendered
 cp src/pve1/msmtp_password.sh /usr/local/bin
 cp src/certificates/msmtprc /etc
-src/debian/install_svcs.sh cert_notifier
+src/pve1/install_svcs.sh cert_notifier
 ```

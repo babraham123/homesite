@@ -16,13 +16,13 @@
   - `nano /etc/apt/sources.list`, add `contrib non-free non-free-firmware` to all 3 sources
   - `nano /etc/apt/sources.list.d/pve-enterprise.list`
 ```
-#deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise
-deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription
+# deb https://enterprise.proxmox.com/debian/pve trixie pve-enterprise
+deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
 ```
 - Basic [Debian Linux setup](./debian.md)
 - Install special tools
 ```bash
-sudo wget https://enterprise.proxmox.com/debian/proxmox-release-bullseye.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-bullseye.gpg
+sudo wget https://enterprise.proxmox.com/debian/proxmox-release-trixie.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-trixie.gpg
 sudo apt install -y libguestfs-tools intel-microcode
 ```
 - Collect system stats to help with VM selection 
@@ -37,6 +37,14 @@ lsblk
 
 ## PCI passthrough
 [src](https://pve.proxmox.com/wiki/PCI_Passthrough)
+
+### Intel NIC
+- Fix crashes
+	- `sudo vim /etc/network/interfaces`
+```
+iface eno1 inet manual
+	post-up ethtool -K eno1 tso off gso off
+```
 
 ### GPU
 - Update grub
@@ -53,20 +61,16 @@ GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_iommu=on iommu=pt initcall_blacklist=sys
 sudo update-grub
 ```
 - Update modules
-```bash
-sudo vim /etc/modules
-```
+  - `sudo vim /etc/modules`
 ```
 vfio
 vfio_iommu_type1
 vfio_pci
 vfio_virqfd
 ```
-
-```bash
-sudo vim /etc/modprobe.d/pve-blacklist.conf
+  - `sudo vim /etc/modprobe.d/pve-blocklist.conf`
 ```
-```
+# GPU passthru
 blacklist nvidiafb
 blacklist nvidia
 blacklist radeon
@@ -91,30 +95,37 @@ find /sys/kernel/iommu_groups/ -type l | sort
 lspci -nnv | grep VGA
 lspci -s 01:00 && lspci -s 01:00 -n
 ```
+- In the PVE UI, Go to VM >> Hardware >> Add PCI device
+  - Check Raw Device, All Functions, ROM-Bar, PCI-Express. Also Primary GPU if using for display.
+- Reboot the VM
 
 ### iGPU
-- Same as above, [ref](https://3os.org/infrastructure/proxmox/gpu-passthrough/igpu-passthrough-to-vm/#linux-virtual-machine-igpu-passthrough-configuration)
-- `sudo vim /etc/modprobe.d/pve-blacklist.conf`
+Same as GPU, just add the following steps ([ref](https://3os.org/infrastructure/proxmox/gpu-passthrough/igpu-passthrough-to-vm/#linux-virtual-machine-igpu-passthrough-configuration)):
+- Add another driver to the blocklist
+  - `sudo vim /etc/modprobe.d/pve-blocklist.conf`
 ```
+# iGPU passthru
 blacklist i915
 ```
 ```bash
 sudo reboot
 lspci -nnv | grep VGA
 ```
-
-### Intel NIC
-- Fix crashes
-	- `sudo vim /etc/network/interfaces`
-```
-iface eno1 inet manual
-	post-up ethtool -K eno1 tso off gso off
-```
+- Confirm that the iGPU has a dedicated IOMMU group
+  - `/root/homelab-rendered/src/debian/iommu_groups.sh`
+- Change the Display type for all VMs
+  - In the PVE UI, Go to VM >> Hardware >> Display
+  - Set the display to `VirtIO-GPU` or `none`. For the target VM use `none`
+- Disable ACPI (not needed anymore)
+  - Go to VM >> Options >> ACPI support >> No
+  - Now to turn off the VM, press Shutdown and then Stop
 
 ### Coral TPU
-- Update modules
-  `sudo vim /etc/modprobe.d/blacklist-apex.conf`
+Same as GPU, just add the following steps
+- Block more modules
+  `sudo vim /etc/modprobe.d/pve-blocklist.conf`
 ```
+# Coral TPU passthru
 blacklist gasket
 blacklist apex
 options vfio-pci ids=1ac1:089a
@@ -126,6 +137,20 @@ lspci -nnv | grep TPU
 - In VM setup, uncheck "Pre-Enroll keys" in BIOS
 - If doesn't work, consider `pcie_aspm=off`
   [ref1](https://github.com/blakeblackshear/frigate/issues/1020), [ref2](https://forum.proxmox.com/threads/guest-internal-error-when-passing-through-pcie.99239/), [ref3](https://www.derekseaman.com/2023/06/home-assistant-frigate-vm-on-proxmox-with-pcie-coral-tpu.html)
+
+## USB Passthrough
+
+Pass thru physical port, [docs](https://pve.proxmox.com/wiki/USB_Physical_Port_Mapping)
+- Get the port details
+```bash
+sudo su
+# Get dev number from device description
+lsusb
+# Get bus and port number
+lsusb -t
+```
+- In the PVE UI, Go to VM >> Hardware >> Add USB device
+- Reboot the VM
 
 ## VM management
 [Docs](https://pve.proxmox.com/pve-docs/qm.1.html)
@@ -142,11 +167,17 @@ cp src/pve2/get_vm_id.sh /usr/local/bin
 ```
 
 ## Networking
-- Remove unnecessary services (not using HA mode)
+- Remove unnecessary services (not using HA mode), [src](https://free-pmx.org/guides/ha-disable/)
 ```bash
-systemctl disable --now pve-ha-crm.service
-systemctl disable --now pve-ha-lrm.service
-systemctl disable --now corosync.service
+systemctl stop pve-ha-crm pve-ha-lrm corosync
+systemctl stop watchdog-mux
+rmmod softdog
+
+systemctl mask pve-ha-crm pve-ha-lrm watchdog-mux corosync
+cat > /etc/modprobe.d/softdog-deny.conf << EOF
+blacklist softdog
+install softdog /bin/false
+EOF
 ```
 
 - Firewall setup, [PVE ports](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_ports_used_by_proxmox_ve)
@@ -166,20 +197,23 @@ Only installed on PVE2. [Ref](https://pve.proxmox.com/wiki/Backup_and_Restore)
   - `vim /etc/apt/sources.list.d/pbs-enterprise.list`
 ```
 # NOT recommended for production use
-deb http://download.proxmox.com/debian/pbs bookworm pbs-no-subscription
+deb http://download.proxmox.com/debian/pbs trixie pbs-no-subscription
 ```
 - Install PBS, [ref](https://pbs.proxmox.com/docs/installation.html)
 ```bash
 apt update
-apt install -y proxmox-backup-server
+apt install -y proxmox-backup-server proxmox-backup
 ufw allow in from any to any port 8007 proto tcp
 ```
 - Connect to console: https://192.168.2.10:8007/ 
 - Further [setup](https://www.youtube.com/watch?v=33ubleU4OFc), [setup2](https://www.youtube.com/watch?v=Px5eHcUKbbQ)
   - Storage >> Directory >> Create: Directory
-  - Datastore >> backup1 >> Prune & GC tab, [options](https://pbs.proxmox.com/docs/maintenance.html)
-    - Prune Jobs >> Add >> Last weekly: 3, last monthly: 3, daily
-    - Garbage Collection >> Edit >> daily
+  - Datastore >> backup1
+    - Content tab >> Add Namespace
+      - Add namespaces for pve1, pve2 under Root
+    - Prune & GC tab, [options](https://pbs.proxmox.com/docs/maintenance.html)
+      - Prune Jobs >> Add >> Last weekly: 3, daily
+      - Garbage Collection >> Edit >> daily
 
 - PVE setup
   - Datacenter >> Storage >> Add >> Proxmox Backup Server
@@ -189,7 +223,7 @@ ufw allow in from any to any port 8007 proto tcp
     - For the schedule I picked Sunday at 1am (pve1), 2am (pve2)
 
 - PVE / PBS backups
-TODO: flesh this out
+  - TODO: flesh this out
 ```bash
 tar -czf "etc-backup-$(date -I).tar.gz" /etc
 ```
@@ -210,17 +244,32 @@ src/debian/install_svcs.sh node_exporter
 ufw allow in from 192.168.4.20 to any port 9100 proto tcp
 ```
 
-Perform these steps after pve1, secsvcs and victoriametrics is configured. [Ref](https://pve.proxmox.com/wiki/External_Metric_Server)
-- Get the metrics admin password from secsvcs
-  `/usr/local/bin/get_secret.sh victoriametrics_admin_password`
-- Go to Datacenter >> Metric Server >> Add >> InfluxDB 
+- Create an API user in the PVE console (for pve1, pve2 and pbs2)
+  - Go to Datacenter >> Permissions >> Users >> Add, name = api_ro
+  - Go to Permissions >> Add >> User Permission
+  - path = /, user = api_ro@pam, role = PVEAuditor, propagate = check
+  - For PBS, Permissions -> Access Control, PVEAuditor -> Audit. Generate a user password:
+```bash
+ssh manualadmin@pve1
+sudo /root/homelab-rendered/src/pve1/secret_update.sh pve1
+```
+
+Perform these steps after pve1, secsvcs and victoriametrics is configured (do this for pve1, pve2 and pbs2). [Ref](https://pve.proxmox.com/wiki/External_Metric_Server)
+- Get the metrics admin password and hash credentials
+```bash
+ssh manualadmin@secsvcs
+password=$(sudo /usr/local/bin/get_secret.sh victoriametrics_admin_password)
+echo -n "admin:$password" | base64
+```
+- Go to Datacenter >> Metric Server >> Add >> InfluxDB
+- For PBS, go to Configuration >> Metric Server >> Add >> InfluxDB (HTTP)
 - Set:
   - server = metrics.janedoe.com
   - port = 443
   - protocol = https
   - organization = proxmox
   - bucket = proxmox
-  - token = admin:PASSWORD
+  - token = CREDS_HASH
 
 ## Upgrade
 
@@ -242,6 +291,7 @@ systemctl status proxmox-backup-proxy.service proxmox-backup.service
 - [PBS guide](https://pbs.proxmox.com/wiki/index.php/Upgrade_from_2_to_3#In-place_Upgrade)
 ```bash
 sudo su
+screen
 pve7to8 --full
 apt update
 apt dist-upgrade
@@ -259,4 +309,39 @@ systemctl status proxmox-backup-proxy.service proxmox-backup.service
 pve7to8 --full
 apt update
 apt upgrade
+```
+
+### From PVE 8 to 9 (bookworm to trixie)
+- Make sure the VM backups are up to date
+- [PVE guide](https://pve.proxmox.com/wiki/Upgrade_from_8_to_9)
+- [PBS guide](https://pbs.proxmox.com/wiki/Upgrade_from_3_to_4)
+```bash
+sudo su
+screen
+tar czf "pve2-backup-$(date -I).tar.gz" -C "/etc" "pve"
+tar czf "pbs2-backup-$(date -I).tar.gz" -C "/etc" "proxmox-backup"
+# Ensure >10GB free disk space
+df -h /
+apt update
+apt dist-upgrade
+pve8to9 --full
+pbs3to4 --full
+pveversion
+proxmox-backup-manager versions
+sed -i 's/bookworm/trixie/g' /etc/apt/sources.list
+sed -i -e 's/bookworm/trixie/g' /etc/apt/sources.list.d/*.list
+apt update
+apt dist-upgrade
+pve8to9 --full
+pbs3to4 --full
+systemctl reboot
+
+sudo su
+systemctl status proxmox-backup-proxy.service proxmox-backup.service
+pve8to9 --full
+pbs3to4 --full
+apt modernize-sources
+apt update
+apt upgrade
+apt install --reinstall pve-manager
 ```
