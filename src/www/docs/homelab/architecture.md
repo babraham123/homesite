@@ -182,12 +182,13 @@ Recorded as ADRs in `docs/adr/`:
 - [Podman quadlets + systemd instead of Kubernetes or Compose](adr/0001-podman-quadlets-over-kubernetes.md)
 - [HAProxy in TCP/SNI-passthrough mode at the edge](adr/0002-haproxy-sni-passthrough.md)
 - [Self-hosted Headscale instead of managed Tailscale](adr/0003-self-hosted-headscale.md)
-- [SOPS + AGE for secrets instead of Vault](adr/0004-sops-age-secrets.md)
+- [SOPS + AGE for secrets instead of a secrets server](adr/0004-sops-age-secrets.md)
 - [SSH forced-command dispatcher instead of a config-management agent](adr/0005-ssh-forced-command-dispatcher.md)
 
 ## Secrets
 
-Secrets use SOPS + AGE encryption and are written to disk encrypted. A custom
-integration injects them into Podman containers at startup; `*.j2.j2` second-pass
-templates render secret values into config files. See
+Secrets stay out of git. They use SOPS + AGE encryption and are written to disk
+encrypted, one file per host, managed from pve1. Podman's shell secrets driver
+decrypts them into containers at startup; `*.j2.j2` second-pass templates render
+secret values into config files for apps that need them there. See
 [Security](security.md#secrets) for the full pipeline.

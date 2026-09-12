@@ -184,18 +184,27 @@ commands. `tools/gen_dispatch_cmds.sh` regenerates dispatcher cases from
 
 ## Secrets
 
-SOPS + AGE, written to disk encrypted (see
+SOPS + AGE, kept out of git and written to disk encrypted (see
 [ADR 0004](adr/0004-sops-age-secrets.md)):
 
-- One AGE keypair per VM; private keys live only on the host, never in git.
-- SOPS encrypts YAML *values*, leaving keys readable, so diffs stay meaningful.
-- At container startup, `get_secret.sh` decrypts and extracts named values;
-  `render_secrets.sh` renders `*.j2.j2` second-pass templates with those values in
-  memory, writes the final config `chmod 400`, or feeds Podman secrets that surface
-  at `/run/secrets/<name>`.
-- Plaintext secrets never sit on disk between deploy and runtime, and never appear in
-  environment variables or `podman inspect` output.
-- Rotation: `src/pve1/secret_update.sh` re-renders and redistributes per node.
+- Source of truth is on pve1: one SOPS file per host at `/root/secrets/<host>.yaml`,
+  encrypted to pve1's AGE key. SOPS encrypts YAML *values*, leaving keys readable.
+- Each host gets `/etc/opt/secrets/secrets.yaml.age`, encrypted with plain `age` to
+  pve1's key and the host's ed25519 SSH key. The host's private key sits beside it in
+  the root-only `/etc/opt/secrets/`.
+- Git holds only `src/<node>/secrets_template.yaml` (names, no values).
+- Podman uses the `shell` secrets driver: Podman stores placeholders, and at container
+  startup `get_secret_by_id.sh` decrypts the requested value from the host file.
+  Quadlets consume them as env vars (`type=env`) or files under `/run/secrets/`.
+- Apps that only read secrets from a config file use `*.j2.j2` second-pass templates:
+  `render_secrets.sh` (via `get_secret.sh`) renders the final config root-owned
+  `chmod 400`. These rendered configs are the only place plaintext sits on disk; the
+  rendered tree itself only ever holds templates.
+- pve1's AGE key is the single point of failure; a lost VM key can be replaced by
+  rerunning `secret_update.sh`.
+- Rotation: `src/pve1/secret_update.sh <host>` edits the SOPS file, re-encrypts and
+  redistributes it, and recreates the Podman placeholders; then restart affected
+  services.
 
 ## VPS hardening
 
