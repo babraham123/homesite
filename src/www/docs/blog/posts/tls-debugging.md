@@ -10,15 +10,15 @@ categories:
 
 # The TLS Rabbit Hole: Debugging Auth Failures Across Three Proxies
 
-I enabled TLS on an internal service and broke SSO logins for half the homelab. The error appeared in Grafana, the logs pointed at Traefik, and the actual bug was a certificate two hops away. This is a debugging story, but mostly it's the *method* I wish I'd had at the start — because layered proxy stacks make TLS failures show up far from their cause.
+I enabled TLS on an internal service and broke SSO logins for half the homelab. The error showed up in Grafana, the logs pointed at Traefik, and the actual bug was a certificate two hops away. This post tells that story, but it's mostly about the debugging process I wish I'd used from the start, because with several layers of proxies, TLS failures tend to show up far from their cause.
 
 <!-- more -->
 
-## The stage
+## The setup
 
-Requests in my lab cross three layers: HAProxy passes encrypted streams by SNI, Traefik terminates public TLS, and behind it, internal services talk TLS with certificates from a private CA. The change: Authelia (the SSO provider) started serving its internal endpoint over TLS instead of plain HTTP.
+Requests in my lab pass through three layers. HAProxy forwards encrypted streams based on SNI, Traefik terminates public TLS, and behind Traefik, internal services talk to each other over TLS using certificates from a private CA. The change I made was switching Authelia (the SSO provider) to serve its internal endpoint over TLS instead of plain HTTP.
 
-Result: the Authelia login page loaded fine, but OIDC clients like Grafana got 502s and handshake errors. Half working, half broken — the most annoying kind of broken.
+After that, the Authelia login page loaded fine, but OIDC clients like Grafana got 502s and handshake errors. Some things worked and some didn't, which is the most annoying kind of failure.
 
 ```mermaid
 flowchart LR
@@ -28,41 +28,41 @@ flowchart LR
     a -->|"LDAPS"| l["LLDAP"]
 ```
 
-Each arrow is a separate trust relationship, and each can fail independently. That's the key insight: **don't debug the symptom's layer — walk the chain from the inside out.**
+Each arrow is a separate trust relationship, and any of them can fail on its own. So the important rule is: **don't start debugging at the layer where the symptom appears. Work through the chain from the inside out.**
 
-## The method
+## The process
 
-**Layer 0 — does the service itself serve TLS correctly?** From its own VM:
+**Layer 0: does the service itself serve TLS correctly?** Test from its own VM:
 
 ```bash
 curl -vvv --cacert internal-ca.pem https://10.10.0.5:9091/
 ```
 
-**Layer 1 — can the next hop verify it?** Traefik's logs mentioned certificate verification failures — meaning either the CA isn't trusted or *the certificate doesn't cover the name being dialed*.
+**Layer 1: can the next hop verify it?** Traefik's logs mentioned certificate verification failures. That means either the CA isn't trusted or the certificate doesn't cover the name being connected to.
 
-**Inspect what's actually presented**, rather than what you deployed:
+**Look at the certificate that's actually being served,** not the one you think you deployed:
 
 ```bash
 openssl s_client -connect 10.10.0.5:9091 -CAfile internal-ca.pem
 openssl x509 -in cert.pem -text -noout   # read the SAN list!
 ```
 
-And there it was: the cert's subject named the internal *hostname*, but Traefik was dialing the container *IP* — which wasn't in the SAN list. Modern TLS ignores the CN field entirely; if the name you dial isn't in the SANs, verification fails no matter how correct everything else is. Reissue with both hostname and IP in the SANs, redistribute, one bug down.
+That's where I found the problem. The cert's subject was the internal hostname, but Traefik was connecting to the container's IP, and the IP wasn't in the SAN list. Modern TLS ignores the CN field completely, so if the name you connect to isn't in the SANs, verification fails no matter what else is right. I reissued the cert with both the hostname and the IP in the SANs and redistributed it, which fixed the first bug.
 
-## The bug behind the bug
+## The second bug
 
-Logins still failed — differently, which in debugging counts as progress. Authelia now logged `redirect_uri did not match any registered URIs`: Grafana's OIDC registration still contained the pre-TLS callback URL. Same browser-level symptom as the cert issue, completely unrelated cause. TLS errors and OAuth misconfigurations *look identical from the outside*; only the logs distinguish them.
+Logins still failed, but with a different error, which at least meant progress. Authelia was now logging `redirect_uri did not match any registered URIs`, because Grafana's OIDC registration still had the callback URL from before the TLS change. The browser showed the same symptom as the certificate problem, but the cause was completely unrelated. TLS errors and OAuth misconfigurations look the same from the outside, and only the logs tell them apart.
 
-Then one final surprise: services on the same VM as Authelia couldn't fetch its OIDC discovery document. Their route to `auth.<domain>` loops back through Traefik, so they needed to trust Traefik's certificate chain — the internal CA had only been distributed to containers with explicit cert mounts. The lesson generalizes: **the CA must be trusted by every client, including the ones you didn't think of as clients.**
+There was one more problem after that. Services on the same VM as Authelia couldn't fetch its OIDC discovery document. Their requests to `auth.<domain>` loop back through Traefik, so they needed to trust Traefik's certificate chain, but the internal CA had only been distributed to containers with explicit cert mounts. This applies more broadly: **every client needs to trust the CA, including services you didn't think of as clients.**
 
-## The protocol, distilled
+## The process, summarized
 
-1. Test each hop independently, inside out — `curl`/`openssl s_client` against each layer directly.
-2. At each hop check two things: is the CA trusted, and is the *dialed name* in the SANs?
-3. Rule out TLS before touching OAuth config — similar symptoms, disjoint causes.
-4. Crank Traefik/Authelia logs to DEBUG temporarily; default levels hide the one useful line.
-5. When curl's errors go vague, `tcpdump` the container network and read the handshake in Wireshark — it shows exactly which message fails.
+1. Test each hop separately, from the inside out, using `curl` or `openssl s_client` against each layer directly.
+2. At each hop, check two things: whether the CA is trusted, and whether the name you're connecting to is in the SANs.
+3. Rule out TLS before changing any OAuth config. The symptoms look similar but the causes are different.
+4. Temporarily set Traefik and Authelia logging to DEBUG. The default log levels hide the one line you need.
+5. If curl's errors aren't specific enough, run `tcpdump` on the container network and open the capture in Wireshark. It shows exactly which handshake message fails.
 
-## Scar tissue
+## Still unfinished
 
-The original goal was *mutual* TLS on the LDAP link — server and client certs both. That remains disabled in my config behind a `TODO`, pending another round of certificate fixes; the link is encrypted, the client-cert half is not. Internal TLS in a homelab is worth it, but every certificate is a small contract about names and trust, and the debugging bill arrives whenever one party misunderstands the contract. At least now I can pay it in minutes instead of evenings.
+My original goal was mutual TLS on the LDAP connection, with both server and client certificates. That's still disabled in my config with a `TODO` until I do another round of certificate fixes, so the connection is encrypted but doesn't use client certs. I still think internal TLS is worth doing in a homelab. Each certificate is a small agreement about names and trust, though, and when one side gets it wrong you end up debugging. With this process it takes me minutes instead of whole evenings.

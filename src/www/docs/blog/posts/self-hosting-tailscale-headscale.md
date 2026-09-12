@@ -9,25 +9,25 @@ categories:
 
 # Self-Hosting Tailscale with Headscale
 
-Tailscale is one of the few products I'd call genuinely magical: install it on two devices and they can reach each other from anywhere, through NATs and firewalls, over WireGuard. But the magic has a coordination server behind it — key exchange, node enrollment, ACLs — and by default that server is Tailscale's cloud.
+Tailscale is one of the few products that feels like magic to me. Install it on two devices and they can reach each other from anywhere over WireGuard, through NATs and firewalls. But that depends on a coordination server that handles key exchange, node enrollment, and ACLs, and by default that server runs in Tailscale's cloud.
 
-Headscale is the open-source reimplementation of that server. I run it on my VPS, which means the entire mesh — enrollment data, connection logs, policy — lives on hardware I control. Here's what that buys, what it costs, and the state of things honestly told.
+Headscale is an open-source reimplementation of that server. I run it on my VPS, so all of the mesh's enrollment data, connection logs, and policy stay on hardware I control. This post covers what that gets me, what it costs, and where things currently stand.
 
 <!-- more -->
 
-## What changes, what doesn't
+## What changes and what doesn't
 
-With Headscale you keep the normal Tailscale client on every device — laptops, phones, VMs — just pointed at your own coordination URL. The WireGuard mesh, NAT traversal, all of it works the same. What you take over: node enrollment (CLI), ACL policy (a HuJSON file), and relaying.
+With Headscale, every device (laptops, phones, VMs) still runs the normal Tailscale client, just pointed at your own coordination URL. The WireGuard mesh and NAT traversal work the same as before. You take over node enrollment (through the CLI), ACL policy (a HuJSON file), and relaying.
 
-In my setup Headscale shares the VPS with HAProxy, which routes `vpn.<domain>` traffic to it by SNI. The mesh is what makes the whole [three-tier ingress design](haproxy-chokepoint.md) work: HAProxy's backends aren't home IP addresses — they're Tailscale addresses, so my home network accepts zero inbound connections from the internet.
+In my setup Headscale shares the VPS with HAProxy, which routes `vpn.<domain>` traffic to it by SNI. The mesh is what makes the [three-tier ingress design](haproxy-chokepoint.md) work. HAProxy's backends are Tailscale addresses rather than home IP addresses, so my home network doesn't accept any inbound connections from the internet.
 
-## The DERP relay: don't skip it
+## Don't skip the DERP relay
 
-Tailscale prefers direct peer-to-peer WireGuard, but some NAT combinations (carrier-grade NAT, strict corporate firewalls) can't be punched through. When that happens, traffic falls back to a DERP relay — and if you self-host coordination, you should relay too, or those peers simply can't connect. Headscale embeds a DERP server; enabling it is a config block, and the relay map distributes to clients automatically. The relay only forwards encrypted packets — even as its operator you can't read the traffic passing through.
+Tailscale prefers direct peer-to-peer WireGuard connections, but some NAT setups, like carrier-grade NAT or strict corporate firewalls, can't be traversed. In those cases traffic falls back to a DERP relay. If you self-host coordination you should self-host a relay too, or those peers won't be able to connect. Headscale has a built-in DERP server that you enable with a config block, and the relay map is sent to clients automatically. The relay only forwards encrypted packets, so even as the operator you can't read the traffic.
 
 ## The bug that ate a weekend
 
-A warning from experience: when mesh routing misbehaves, suspect the client before your config. I lost hours to a macOS Tailscale bug where subnet routes advertised by a Mac were accepted by Headscale but silently not re-propagated after reconnects. The diagnosis toolkit, for future reference:
+When mesh routing misbehaves, suspect the client before your own config. I lost hours to a macOS Tailscale bug where Headscale accepted subnet routes advertised by a Mac but didn't re-propagate them after reconnects. These are the commands I used to track it down:
 
 ```bash
 headscale nodes list          # enrollment + last-seen
@@ -37,19 +37,19 @@ ip route show table 52        # what routes actually got installed
 watch -n 0.5 tailscale status # direct vs. relayed, live
 ```
 
-The fix was architectural: don't use a Mac as a subnet router; a Linux VM on the same subnet advertises the routes instead. Check the Tailscale GitHub issues *before* assuming your Headscale config is wrong.
+The fix was to change the architecture. I stopped using a Mac as a subnet router and had a Linux VM on the same subnet advertise the routes instead. Check the Tailscale GitHub issues before assuming your Headscale config is wrong.
 
-## Honest state: the ACLs are off
+## The ACLs are currently off
 
-Headscale supports Tailscale-style ACLs, and I wrote a proper group-based policy matrix — which is currently disabled, with a permissive policy active. The blocker is upstream: pfSense runs on FreeBSD, where Tailscale can't disable SNAT on subnet routes, so LAN traffic routed through the mesh loses its real source IP at the router — and ACLs can't match on source IPs that have been rewritten. Until that lands, network-layer enforcement comes from VLAN firewall rules and the SSO layer, and the "zero-trust mesh" remains aspirational. It's written down as a tracked issue rather than quietly forgotten, which I've decided counts as engineering.
+Headscale supports Tailscale-style ACLs, and I wrote a proper group-based policy matrix, but it's disabled and a permissive policy is active instead. The problem is upstream. pfSense runs on FreeBSD, where Tailscale can't disable SNAT on subnet routes, so LAN traffic routed through the mesh loses its real source IP at the router. ACLs can't match on source IPs that have been rewritten. Until that's fixed, network-level enforcement comes from VLAN firewall rules and the SSO layer, and the mesh isn't zero-trust yet. At least it's written down as a tracked issue instead of being forgotten.
 
-## What you give up vs. managed Tailscale
+## What you give up compared to managed Tailscale
 
-- **MagicDNS** — I run my own DNS anyway (Unbound local zones), so no loss here.
-- **The admin web UI** — everything is `headscale` CLI commands. Fine for one operator.
-- **Feature lag** — new Tailscale client features sometimes wait on Headscale support.
-- **Funnel and other SaaS-side features** — my public ingress is HAProxy, so not missed.
+- **MagicDNS.** I already run my own DNS (Unbound local zones), so I don't miss it.
+- **The admin web UI.** Everything is done with `headscale` CLI commands, which is fine for one person.
+- **New features.** New Tailscale client features sometimes take a while to get Headscale support.
+- **Funnel and other hosted features.** My public ingress is HAProxy, so I don't need them.
 
-## Verdict
+## Who should run it
 
-If you're already self-hosting a pile of infrastructure, Headscale's marginal cost is one more systemd service and an occasional version bump — and in exchange, the map of every device you own and when it connects stays yours. If you just want the magic with zero operations, pay Tailscale; the free tier is generous and the product is excellent. For this homelab, whose entire premise is owning the stack, the choice made itself.
+If you already self-host a lot of infrastructure, Headscale only adds one more systemd service and an occasional version upgrade. In exchange, the record of every device you own and when it connects stays with you. If you just want it to work with no maintenance, pay for Tailscale. The free tier is generous and the product is excellent. This whole homelab is about owning the stack, though, so Headscale was an easy choice for me.

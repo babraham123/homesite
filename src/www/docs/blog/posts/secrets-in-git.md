@@ -9,26 +9,26 @@ categories:
 
 # Every Secret in My Homelab Is Committed to Git
 
-That headline is designed to make security people twitch, so let me finish the sentence: every secret is committed to git *encrypted*, with SOPS and AGE, and plaintext never touches a disk anywhere in the pipeline.
+That title will probably make security people nervous, so here's the rest of the sentence: every secret is committed to git encrypted with SOPS and AGE, and plaintext is never written to disk anywhere in the pipeline.
 
-This is the piece that makes "the whole homelab is reproducible from the repo" actually true. Config without secrets is only half a system.
+This is what makes it true that the whole homelab can be rebuilt from the repo. Config without secrets is only half of a working system.
 
 <!-- more -->
 
 ## Why not just use Vault?
 
-The standard answer for secrets management is HashiCorp Vault, and for a team it's the right one. For a single operator it's a lot: a stateful, always-on service with its own unsealing ritual and availability story — a critical dependency that exists to serve... me. I wrote this down as an architecture decision record so future-me stops relitigating it.
+The standard tool for managing secrets is HashiCorp Vault, and it's the right choice for a team. For one person it's a lot. It's a stateful, always-on service with its own unsealing process and its own uptime to worry about, and it would be a critical dependency whose only user is me. I wrote this up as an architecture decision record so I'd stop reopening the question.
 
-The alternative: encrypt the secrets *into the repo* and make decryption a host-local operation.
+The alternative is to encrypt the secrets into the repo and make decryption something that happens locally on each host.
 
-- **AGE** is modern file encryption without GPG's baggage — small keypairs, no keyservers, one obvious way to use it.
-- **SOPS** encrypts only the *values* in a YAML file, leaving the keys readable. Diffs stay meaningful: you can see *that* `authelia_smtp_password` changed and when, without ever seeing what it is.
+- **AGE** is a modern file encryption tool without GPG's complexity. It has small keypairs, no keyservers, and one straightforward way to use it.
+- **SOPS** encrypts only the values in a YAML file and leaves the keys readable. That keeps diffs useful: you can see that `authelia_smtp_password` changed and when, without seeing the password.
 
-Each VM has its own AGE keypair. The private key lives only on that host — it's the one thing that isn't in git. Repo + secrets file + one key = a fully rebuilt node.
+Each VM has its own AGE keypair. The private key exists only on that host, and it's the one thing not stored in git. With the repo, the secrets file, and that key, a node can be fully rebuilt.
 
 ## The pipeline: from ciphertext to container
 
-The interesting engineering is getting decrypted values into containers without ever parking plaintext on disk. Two paths:
+The interesting part is getting decrypted values into containers without ever writing plaintext to disk. There are two ways this happens:
 
 ```mermaid
 flowchart LR
@@ -44,25 +44,25 @@ flowchart LR
     gs --> rs --> cfg --> c
 ```
 
-**Path 1: Podman secrets.** The quadlet declares `Secret=name,type=env,...`; at startup the secret is decrypted and handed to the container. It shows up at `/run/secrets/<name>` or as an env var inside the container — but not in `podman inspect`, not in the unit file, not in the process command line.
+**Path 1: Podman secrets.** The quadlet declares `Secret=name,type=env,...`. At startup the secret is decrypted and passed to the container, where it appears at `/run/secrets/<name>` or as an environment variable. It doesn't show up in `podman inspect`, in the unit file, or on the process command line.
 
-**Path 2: the `*.j2.j2` double template.** Some apps insist on secrets inside a config file (database URLs, API keys). Those configs are Jinja2 templates *twice over*:
+**Path 2: the `*.j2.j2` double template.** Some apps require secrets inside a config file, such as database URLs or API keys. Those configs are Jinja2 templates that get rendered twice:
 
-- **Pass 1, deploy time:** `render_src.sh` fills in the boring variables — IPs, hostnames, usernames. The output still contains `{{ secret_placeholders }}` and ships to the host like that.
-- **Pass 2, container startup:** an `ExecStartPre=` hook decrypts the needed values, renders the final file, and locks it to `chmod 400`.
+- **Pass 1, at deploy time:** `render_src.sh` fills in the non-secret variables like IPs, hostnames, and usernames. The output still contains `{{ secret_placeholders }}` and is shipped to the host that way.
+- **Pass 2, at container startup:** an `ExecStartPre=` hook decrypts the values it needs, renders the final file, and sets it to `chmod 400`.
 
-Between deploy and runtime, the file on disk is a template with holes in it. The plaintext exists in memory, briefly, on the machine that needs it. That's the whole trick.
+Between deploy and startup, the file on disk is a template with the secrets still missing. The plaintext only exists briefly, in memory, on the machine that needs it.
 
-## Day-to-day ergonomics
+## Day-to-day use
 
-This sounds elaborate but daily use is one command: `sops secrets.yaml` opens the decrypted file in `$EDITOR` and re-encrypts on save. Adding a secret is: add the value there, reference it from a template or quadlet, redeploy. Git history shows every change (but no values).
+This sounds complicated, but day to day it's one command. `sops secrets.yaml` opens the decrypted file in `$EDITOR` and re-encrypts it when you save. To add a secret, I add the value there, reference it from a template or quadlet, and redeploy. Git history records every change without exposing any values.
 
-## Tradeoffs, honestly
+## Tradeoffs
 
-- **The AGE key is a single point of failure.** Lose a host's private key and that host's secrets are gone. Keys need real backup discipline (mine live in exactly two offline places).
-- **No audit log.** Vault tells you who read what and when; a file has no opinions. Fine for one operator, disqualifying for a team.
-- **Rotation is re-render + restart**, not a hot swap. At homelab scale that's a non-issue.
+- **Each AGE key is a single point of failure.** If a host's private key is lost, that host's secrets are gone. The keys need to be backed up carefully, and mine are stored in two offline locations.
+- **There's no audit log.** Vault records who read which secret and when, but a file can't do that. That's fine for one person and a dealbreaker for a team.
+- **Rotation means re-rendering and restarting,** not a live swap. At homelab scale that isn't a problem.
 
-What I get in exchange: zero extra services, no unsealing ceremony at 2 AM, and a repo that is *actually* the whole system — the property everything else in this series builds on.
+In return, I don't run any extra services, I never have to unseal anything at 2 AM, and the repo really does contain the whole system. The rest of this series depends on that.
 
-Scripts are in [the repo](https://github.com/babraham123/homelab): `get_secret.sh`, `render_secrets.sh`, and the ADR that explains the choice.
+The scripts are in [the repo](https://github.com/babraham123/homelab): `get_secret.sh`, `render_secrets.sh`, and the ADR that explains the decision.
