@@ -1,6 +1,5 @@
 ---
-draft: true
-date: 2026-10-20
+date: 2026-08-15
 comments: true
 categories:
   - homelab

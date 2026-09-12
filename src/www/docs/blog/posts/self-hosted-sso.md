@@ -1,6 +1,5 @@
 ---
-draft: true
-date: 2026-09-15
+date: 2026-07-11
 comments: true
 categories:
   - homelab
@@ -49,7 +48,7 @@ sequenceDiagram
 
 Authelia's access rules start with `default_policy: deny` and allow specific routes from there, with stricter requirements for more sensitive ones. Some routes need one factor, and admin routes need two. TOTP and WebAuthn/passkeys are both enabled, and password strength is checked with zxcvbn instead of arbitrary complexity rules.
 
-The secrets this depends on (the LDAP bind password, OIDC HMAC key, issuer private key, and storage encryption key) never appear in config files on disk. They're injected when the container starts from an encrypted store, which is covered in [a separate post](secrets-in-git.md).
+The secrets this depends on (the LDAP bind password, OIDC HMAC key, issuer private key, and storage encryption key) never appear in config files on disk. They're injected when the container starts from an encrypted store, which is covered in [a separate post](encrypted-secrets.md).
 
 ## Lessons learned
 
