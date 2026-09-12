@@ -1,6 +1,5 @@
 ---
-draft: true
-date: 2026-09-08
+date: 2026-07-04
 comments: true
 categories:
   - homelab
@@ -78,7 +77,7 @@ This sounds primitive compared to DNS-based service discovery, and it is, but th
 
 ## Secrets
 
-The `Secret=` lines reference Podman secrets, which get populated at deploy time from a SOPS+AGE-encrypted file in git. Some configs need secrets written into the file itself. For those, there's a second-pass template pattern (`*.j2.j2`) that renders at container startup, and the plaintext only exists in memory. That pipeline has [its own post](secrets-in-git.md), and it's my favorite part of the setup.
+The `Secret=` lines reference Podman secrets. Podman is configured with a shell driver, so each value is looked up at container startup from an AGE-encrypted file on the host instead of being stored by Podman. Some configs need secrets written into the file itself. For those, there's a second-pass template pattern (`*.j2.j2`) that renders the final config at container startup. That pipeline has [its own post](encrypted-secrets.md), and it's my favorite part of the setup.
 
 ## Downsides
 

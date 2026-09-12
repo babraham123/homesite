@@ -1,6 +1,5 @@
 ---
-draft: true
-date: 2026-09-01
+date: 2026-06-27
 comments: true
 categories:
   - homelab
@@ -19,7 +18,7 @@ This post is an overview, and later posts cover each layer in more detail. Every
 
 Every homelab is shaped by its constraints. These are mine:
 
-1. **Reproducible from git.** If a machine dies, the repo plus one encryption key can rebuild it. There are no hand-configured servers and no settings I clicked through in a web UI two years ago and forgot about.
+1. **Reproducible from code.** If a machine dies, the repo, my variables file, and the encrypted secrets kept on pve1 can rebuild it. There are no hand-configured servers and no settings I clicked through in a web UI two years ago and forgot about.
 2. **No cloud dependencies,** with one exception: a cheap VPS that serves as the public endpoint, because residential ISPs and CGNAT make hosting directly from home miserable.
 3. **Low power use.** The always-on hardware draws about 15-20 W. The larger machine is turned on when it's needed and stays off otherwise.
 
@@ -78,7 +77,7 @@ Inside the house, split-horizon DNS lets Unbound resolve the same hostnames dire
 
 The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, and a set of parse scripts generate the repetitive parts: DNS records from Traefik routes, metrics scrape targets from service configs, and sudoers entries from the command whitelist. Validation (YAML lint and duplicate-IP checks) runs first, and then `deploy_src.sh` pushes everything to every node.
 
-Secrets are committed to git too. They're encrypted with SOPS and AGE and only decrypted in memory when a container starts. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a whitelisted set of actions. Both of these will get their own posts.
+Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE, and values are decrypted when a container starts. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a whitelisted set of actions. Both of these will get their own posts.
 
 ## Known gaps
 
