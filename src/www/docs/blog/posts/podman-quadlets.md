@@ -9,23 +9,23 @@ categories:
 
 # Skipping Kubernetes: Podman Quadlets and Systemd
 
-My homelab runs ~30 containerized services — an SSO stack, a metrics pipeline, Home Assistant, the works. There is no Kubernetes, no k3s, no Docker Compose. The container orchestrator is systemd, which was already there.
+My homelab runs about 30 containerized services, including an SSO stack, a metrics pipeline, and Home Assistant. There's no Kubernetes, no k3s, and no Docker Compose. The container orchestrator is systemd, which was already installed.
 
-This post is about Podman quadlets: what they are, what a real unit looks like, and where the approach runs out of road.
+This post covers Podman quadlets: what they are, what a real unit file looks like, and where the approach stops working.
 
 <!-- more -->
 
 ## The problem with the obvious choices
 
-For a single-operator homelab, what you actually need from an orchestrator is short: start containers at boot, restart them on failure, order dependencies, collect logs. That's it. That's the list.
+For a homelab run by one person, the list of things you need from an orchestrator is short. It has to start containers at boot, restart them when they fail, handle dependency ordering, and collect logs.
 
-Kubernetes gives you that plus a control plane, CNI plugins, and a YAML complexity tax you never amortize when you're one person. Docker Compose is lighter, but it wants its own daemon and its systemd integration has always felt bolted on.
+Kubernetes does all of that, but it also brings a control plane, CNI plugins, and a lot of YAML, and one person never really earns back that complexity. Docker Compose is lighter, but it needs its own daemon, and its systemd integration has always felt like an afterthought to me.
 
-Meanwhile systemd already does lifecycle, restart policies, dependency ordering, and logging — for every other process on the machine.
+systemd already handles lifecycle, restart policies, dependency ordering, and logging for every other process on the machine.
 
 ## Enter quadlets
 
-A quadlet is a file like `authelia.container` dropped into `/etc/containers/systemd/`. On `systemctl daemon-reload`, a Podman generator turns it into a real systemd service. Here's a trimmed version of my actual Authelia unit:
+A quadlet is a file like `authelia.container` placed in `/etc/containers/systemd/`. When you run `systemctl daemon-reload`, a Podman generator turns it into a real systemd service. Here's a trimmed version of my actual Authelia unit:
 
 ```ini
 [Unit]
@@ -46,7 +46,7 @@ NoNewPrivileges=true
 Restart=on-failure
 ```
 
-The `[Unit]` section is plain systemd — Authelia won't start until LLDAP and Postgres are up. The `[Container]` section is Podman. And once it's running, every tool you already know applies:
+The `[Unit]` section is plain systemd, so Authelia won't start until LLDAP and Postgres are up. The `[Container]` section is Podman-specific. Once the service is running, all the usual tools work:
 
 ```bash
 systemctl status authelia
@@ -54,15 +54,15 @@ journalctl -eu authelia
 systemctl restart authelia
 ```
 
-There's no new operational vocabulary. That's the whole pitch.
+The main appeal is that there are no new commands or concepts to learn.
 
-## Static IPs and the death of service discovery
+## Static IPs instead of service discovery
 
-Alongside `.container` files there are `.network` and `.volume` quadlets. Each VM defines one bridge network, and every container gets a **static IP** on it:
+Besides `.container` files, there are also `.network` and `.volume` quadlets. Each VM defines one bridge network, and every container gets a **static IP** on it:
 
 ```mermaid
 flowchart LR
-    subgraph secsvcs["secsvcs VM — 10.10.0.0/24"]
+    subgraph secsvcs["secsvcs VM (10.10.0.0/24)"]
         t["traefik .6"]
         a["authelia .5"]
         l["lldap .4"]
@@ -74,22 +74,22 @@ flowchart LR
     t --> g
 ```
 
-This sounds primitive compared to DNS-based service discovery, and it is — deliberately. Static IPs make everything downstream deterministic: Traefik routes, DNS records, and metrics scrape targets are all *generated* from the same source at deploy time. The render pipeline even fails the build if two containers claim the same IP. Boring, predictable, greppable.
+This sounds primitive compared to DNS-based service discovery, and it is, but that's on purpose. Static IPs make everything downstream predictable. Traefik routes, DNS records, and metrics scrape targets are all generated from the same source at deploy time, and the render pipeline fails the build if two containers claim the same IP. It's simple, and I can grep for any address.
 
-## The secrets trick
+## Secrets
 
-The `Secret=` lines reference Podman secrets, which are populated at deploy time from a SOPS+AGE-encrypted file in git. For configs that need secrets baked into the file itself, there's a second-pass template pattern (`*.j2.j2`) rendered at container startup with the plaintext existing only in memory. That pipeline gets [its own post](secrets-in-git.md) — it's my favorite part of the whole setup.
+The `Secret=` lines reference Podman secrets, which get populated at deploy time from a SOPS+AGE-encrypted file in git. Some configs need secrets written into the file itself. For those, there's a second-pass template pattern (`*.j2.j2`) that renders at container startup, and the plaintext only exists in memory. That pipeline has [its own post](secrets-in-git.md), and it's my favorite part of the setup.
 
-## Where it hurts
+## Downsides
 
-Full honesty about the tradeoffs:
+There are real tradeoffs:
 
-- **No rolling updates.** A restart is a few seconds of downtime. For a homelab: who cares. For anything with real users: care.
-- **No health-check orchestration.** Systemd knows if the process died, not if the app is wedged. External monitoring (Gatus) covers this instead.
-- **Scale ceiling.** At ~30 services this is delightful. At 300 spread across many hosts, you'd be rebuilding Kubernetes badly.
+- **No rolling updates.** A restart means a few seconds of downtime. That doesn't matter for a homelab, but it would for anything with real users.
+- **No health-check orchestration.** systemd knows when a process has died, but not when an app is hung. External monitoring (Gatus) covers that instead.
+- **Limited scale.** This works well at around 30 services. At 300 services across many hosts, you'd end up rebuilding a worse version of Kubernetes.
 
-## Verdict
+## Why I'd recommend it
 
-Quadlets hit a sweet spot that I think is underrated: if you already know systemd, the marginal learning curve is nearly zero, and there is *no orchestrator to operate*. Nothing to upgrade, no control plane to babysit, no cluster state to lose. The containers are just services, and services are a solved problem.
+I think quadlets are underrated. If you already know systemd, there's almost nothing new to learn, and there's no orchestrator to run. You don't have a control plane to upgrade or cluster state to lose. The containers are just services, and managing services is a solved problem.
 
-The full unit files are in [the repo](https://github.com/babraham123/homelab) under `src/*/`, one directory per service.
+The full unit files are in [the repo](https://github.com/babraham123/homelab) under `src/*/`, with one directory per service.
