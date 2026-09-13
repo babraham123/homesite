@@ -1,6 +1,11 @@
 ---
 date: 2026-08-29
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/gpu-game-streaming-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/gpu-game-streaming-card.webp
 categories:
   - homelab
   - gaming
@@ -13,6 +18,11 @@ There's a Windows gaming machine in my house that nobody has ever seen. It's a V
 I built this mostly because I could, and it has more rough edges than anything else in the homelab. This post covers what ended up working.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![A tower PC with its GPU glowing through the glass side panel](../../img/blog/gpu-game-streaming.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me: homelab hardware that, unlike most of it, has a glowing logo nobody gets to see.</figcaption>
+</figure>
 
 ## The idea
 

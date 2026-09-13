@@ -1,6 +1,11 @@
 ---
 date: 2026-07-11
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/self-hosted-sso-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/self-hosted-sso-card.webp
 categories:
   - homelab
   - security
@@ -13,6 +18,11 @@ Once a homelab grows past a handful of services, authentication becomes the most
 Mine is built from LLDAP, Authelia, and Traefik. It's all self-hosted, with no "Sign in with Google" anywhere.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![A cutaway radial engine with its cylinders arranged around a single crankshaft](../../img/blog/self-hosted-sso.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me at a science museum: a radial engine, where every cylinder turns the same crankshaft. Basically single sign-on.</figcaption>
+</figure>
 
 ## The stack
 

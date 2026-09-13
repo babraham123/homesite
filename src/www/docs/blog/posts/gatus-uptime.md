@@ -1,6 +1,11 @@
 ---
 date: 2026-08-22
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/gatus-uptime-card.webp
+    background_color: "#00000073"
+image: ../../img/blog/gatus-uptime-card.webp
 categories:
   - homelab
   - observability
@@ -11,6 +16,11 @@ categories:
 The [last post](observability-stack.md) covered the metrics stack. This one covers its backup: Gatus, a small uptime monitor. Grafana tells me what the CPU is doing. Gatus tells me whether a service is up or down, at a glance, and it sends its own alerts.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![Sunrise over a range of mountain peaks](../../img/blog/gatus-uptime.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me on a recent trip. A status page should feel like this view: everything visible at a glance.</figcaption>
+</figure>
 
 ## Why a second monitoring system
 

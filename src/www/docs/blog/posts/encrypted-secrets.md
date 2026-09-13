@@ -1,18 +1,28 @@
 ---
 date: 2026-07-18
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/encrypted-secrets-card.webp
+    background_color: "#00000059"
+image: ../../img/blog/encrypted-secrets-card.webp
 categories:
   - homelab
   - security
 ---
 
-# Encrypted Homelab Secrets Without a Secrets Server
+# Encrypted Homelab Secrets Without a Secrets Manager
 
 My homelab repo is public, and it's written to be generic. Real hostnames, domains, and IPs live in a gitignored `vars.yml`, and the committed examples use placeholder values. Secrets stay out of git for the same reason. Each VM gets one encrypted secrets file on its own disk, and values are decrypted only when a container starts.
 
 The pieces are SOPS, AGE, and Podman's shell secrets driver. There's no extra service to run.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![The Milky Way above silhouetted pine trees](../../img/blog/encrypted-secrets.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me on a recent trip: a night sky that keeps its secrets in plain sight, like a well-encrypted file.</figcaption>
+</figure>
 
 ## Why not a secrets manager?
 
