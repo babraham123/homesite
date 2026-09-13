@@ -1,0 +1,43 @@
+/* Header photo below the blurb of a blog post */
+.md-typeset figure.post-hero {
+  width: 100%;
+  margin: 0 0 1.6em;
+}
+
+.md-typeset figure.post-hero img {
+  width: 100%;
+  height: auto;
+  border-radius: 0.2rem;
+}
+
+.md-typeset figure.post-hero figcaption {
+  max-width: none;
+  margin-top: 0.4em;
+  font-size: 0.7rem;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Blog index: a small thumbnail beside each excerpt */
+.md-post__thumb {
+  float: right;
+  margin: 0 0 0.8rem 1.2rem;
+}
+
+.md-post__thumb img {
+  display: block;
+  width: 7rem;
+  height: 7rem;
+  object-fit: cover;
+  border-radius: 0.2rem;
+}
+
+@media screen and (max-width: 30em) {
+  .md-post__thumb {
+    margin-left: 0.8rem;
+  }
+
+  .md-post__thumb img {
+    width: 4.5rem;
+    height: 4.5rem;
+  }
+}

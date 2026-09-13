@@ -1,6 +1,11 @@
 ---
 date: 2026-08-15
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/observability-stack-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/observability-stack-card.webp
 categories:
   - homelab
   - observability
@@ -13,6 +18,11 @@ Most observability tutorials assume you have a Kubernetes cluster, a habit of in
 The stack is VictoriaMetrics, VictoriaLogs, Fluent Bit, Grafana, and an alert pipeline that ends at ntfy.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![The Hubble Space Telescope on display](../../img/blog/observability-stack.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me at a science museum. The Hubble takes observability a bit further than Grafana does.</figcaption>
+</figure>
 
 ## Why VictoriaMetrics instead of Prometheus
 

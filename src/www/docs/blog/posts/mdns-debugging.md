@@ -1,6 +1,11 @@
 ---
 date: 2026-09-12
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/mdns-debugging-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/mdns-debugging-card.webp
 categories:
   - homelab
   - debugging
@@ -14,6 +19,11 @@ After a network reconfiguration, Zigbee2MQTT couldn't reach the MQTT broker anym
 I [wrote previously](vlans-and-mdns.md) about how VLAN segmentation breaks mDNS discovery and the repeater setup that fixes it. This follow-up is about what debugging that setup looks like when it fails without any errors.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![An LED controller board wired up with relays and terminal blocks](../../img/blog/mdns-debugging.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me: circuits from an unrelated project, which involved zero mDNS and was much more relaxing.</figcaption>
+</figure>
 
 ## The symptom
 

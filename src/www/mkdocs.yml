@@ -7,6 +7,7 @@ site_url: https://bket.net/
 
 theme:
   name: material
+  custom_dir: theme
   logo: img/favicon.ico
   features:
     - search.suggest
@@ -57,6 +58,12 @@ plugins:
         - categories
       comments_path: "#__comments"
 
+hooks:
+  - hooks/feed_images.py
+
+extra_css:
+  - stylesheets/extra.css
+
 markdown_extensions:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
@@ -69,4 +76,6 @@ markdown_extensions:
   - admonition
   - pymdownx.details
   - tables
+  - attr_list
+  - md_in_html
 ...

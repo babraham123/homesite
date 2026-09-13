@@ -1,4 +1,4 @@
-# ADR 0004: SOPS + AGE for secrets instead of a secrets server
+# ADR 0004: SOPS + AGE for secrets instead of a secrets manager
 
 Status: accepted (backfilled 2026-08-30; decision predates this record; revised
 2026-09-12 to match the implementation)
@@ -39,7 +39,7 @@ Keep secrets out of git and write them to disk encrypted with SOPS and AGE.
 
 - The repo, `vars.yml`, and the SOPS files on pve1 reproduce a node from scratch. Git
   is not a backup for secrets; the SOPS files and pve1's AGE key need their own.
-- No secrets server to run; no audit log of access either, acceptable for one
+- No secrets manager to run; no audit log of access either, acceptable for one
   operator, wrong for a team.
 - pve1's AGE key is the single point of failure: it decrypts every host's source file.
   A lost VM key is recoverable by generating a new one and rerunning

@@ -1,6 +1,11 @@
 ---
 date: 2026-07-04
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/podman-quadlets-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/podman-quadlets-card.webp
 categories:
   - homelab
   - containers
@@ -13,6 +18,11 @@ My homelab runs about 30 containerized services, including an SSO stack, a metri
 This post covers Podman quadlets: what they are, what a real unit file looks like, and where the approach stops working.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![An enclosure packed with power supplies, driver boards, and wiring](../../img/blog/podman-quadlets.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me: circuits from an unrelated project. Not the kind of containers this post is about, but just as packed.</figcaption>
+</figure>
 
 ## The problem with the obvious choices
 

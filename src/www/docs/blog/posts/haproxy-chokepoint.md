@@ -1,6 +1,11 @@
 ---
 date: 2026-07-25
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/haproxy-chokepoint-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/haproxy-chokepoint-card.webp
 categories:
   - homelab
   - security
@@ -14,6 +19,11 @@ My homelab has exactly one machine with a public IP: the smallest Linode instanc
 That file handles SNI routing, rate limiting, sticky banning, geo-blocking, and filtering of common attack paths. This post walks through each of those, and explains why the design assumes the VPS will eventually be compromised.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![A waterfall pouring over a granite cliff](../../img/blog/haproxy-chokepoint.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me on a recent trip: a whole river squeezed through one narrow gap, which is how all of my public traffic gets in.</figcaption>
+</figure>
 
 ## Never terminate TLS at the edge
 

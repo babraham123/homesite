@@ -1,6 +1,11 @@
 ---
 date: 2026-06-27
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/private-cloud-at-home-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/private-cloud-at-home-card.webp
 categories:
   - homelab
   - overview
@@ -13,6 +18,11 @@ A few years ago I started wondering how much of my digital life could run on har
 This post is an overview, and later posts cover each layer in more detail. Everything described here is in a public repo at [github.com/babraham123/homelab](https://github.com/babraham123/homelab), and the whole system deploys with one command.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![Looking down into a tower PC: fans, RAM, the CPU socket, and a GPU](../../img/blog/private-cloud-at-home.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me: homelab hardware with its side panel off, which is how it spends a surprising amount of time.</figcaption>
+</figure>
 
 ## Ground rules
 

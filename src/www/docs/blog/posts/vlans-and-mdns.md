@@ -1,6 +1,11 @@
 ---
 date: 2026-08-01
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/vlans-and-mdns-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/vlans-and-mdns-card.webp
 categories:
   - homelab
   - networking
@@ -13,6 +18,11 @@ Putting IoT devices on their own VLAN is one of the most common pieces of homela
 This post covers my segmentation design, the mDNS problem it causes, and the three things I did to fix it.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![Inside the mini PC router: four 2.5 GbE ports, an NVMe SSD, and a battery](../../img/blog/vlans-and-mdns.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me: the mini PC that runs my router, opened up to show off its four network ports.</figcaption>
+</figure>
 
 ## The VLAN layout
 

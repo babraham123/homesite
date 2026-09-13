@@ -1,6 +1,11 @@
 ---
 date: 2026-08-08
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/self-hosting-tailscale-headscale-card.webp
+    background_color: "#00000080"
+image: ../../img/blog/self-hosting-tailscale-headscale-card.webp
 categories:
   - homelab
   - networking
@@ -13,6 +18,11 @@ Tailscale is one of the few products that feels like magic to me. Install it on 
 Headscale is an open-source reimplementation of that server. I run it on my VPS, so all of the mesh's enrollment data, connection logs, and policy stay on hardware I control. This post covers what that gets me, what it costs, and where things currently stand.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![A city skyline and ferry piers lit up at night](../../img/blog/self-hosting-tailscale-headscale.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me: a cityscape from a recent trip. Thousands of independent lights, with one grid coordinating them all.</figcaption>
+</figure>
 
 ## What changes and what doesn't
 

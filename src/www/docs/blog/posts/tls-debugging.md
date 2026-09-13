@@ -1,6 +1,11 @@
 ---
 date: 2026-09-05
 comments: true
+social:
+  cards_layout_options:
+    background_image: docs/img/blog/tls-debugging-card.webp
+    background_color: "#00000099"
+image: ../../img/blog/tls-debugging-card.webp
 categories:
   - homelab
   - debugging
@@ -12,6 +17,11 @@ categories:
 I enabled TLS on an internal service and broke SSO logins for half the homelab. The error showed up in Grafana, the logs pointed at Traefik, and the actual bug was a certificate two hops away. This post tells that story, but it's mostly about the debugging process I wish I'd used from the start, because with several layers of proxies, TLS failures tend to show up far from their cause.
 
 <!-- more -->
+
+<figure class="post-hero" markdown>
+![A cutaway jet engine showing its rows of compressor blades](../../img/blog/tls-debugging.webp){ width="1600" height="900" loading="lazy" }
+<figcaption>Photo by me at a science museum: a cutaway jet engine, which is roughly what three layers of proxies look like.</figcaption>
+</figure>
 
 ## The setup
 
