@@ -32,7 +32,7 @@ sudo su
 ```bash
 apt update
 apt upgrade
-apt install -y zsh vim iproute2 git less curl wget zip unzip ethtool jq unattended-upgrades ufw screen
+apt install -y zsh vim iproute2 git less curl wget zip unzip ethtool jq unattended-upgrades ufw screen zstd
 chsh -s /bin/zsh
 
 # enable firewall
@@ -103,8 +103,9 @@ plugins=(zsh-autosuggestions zsh-syntax-highlighting git)
 ```bash
 exit
 # From your local machine
-tools/render_src.sh /tmp/homelab-rendered
-tools/upload_src.sh SUBDOMAIN /tmp/homelab-rendered
+out=$(mktemp -d)/homelab-rendered
+tools/render_src.sh "$out"
+tools/upload_src.sh SUBDOMAIN "$out"
 ```
 
 ## Automation

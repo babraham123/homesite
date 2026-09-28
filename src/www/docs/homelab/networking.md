@@ -10,7 +10,7 @@ The ground-truth configs are `src/dns/unbound.conf.j2`,
 ## Physical and logical topology
 
 pfSense runs as a VM on pve1 with all four of the mini PC's 2.5 GbE NICs
-(Intel i226, `igc0`–`igc3`) PCI-passed through to it. The Proxmox host itself has no
+(Intel i226, `igc0`–`igc3`, in PCI address order) PCI-passed through to it. The Proxmox host itself has no
 physical uplink: it sits on the virtual bridge `vmbr0`, with the pfSense VM as its
 gateway.
 
@@ -99,9 +99,10 @@ internet. The AP's management interface lives on the trusted VLAN.
 Unbound on pfSense serves split-horizon DNS for the site domain:
 
 - Every host and VM gets a `local-zone` redirect (e.g. `secsvcs.janedoe.com`).
-- Per-service records are auto-generated at render time: `tools/parse_routes.sh`
-  extracts the subdomains each node's Traefik serves, and the template loops emit
-  records pointing at that node's VM IP (e.g. `auth.janedoe.com → 192.168.4.20`).
+- Per-service records are generated at render time from the `subdomain` of each
+  service in `src/nodes.yml` (checked against the node's Traefik `Host()` rules), and
+  the template loops emit records pointing at that node's VM IP (e.g.
+  `auth.janedoe.com → 192.168.4.20`). HAProxy's SNI routing uses the same lists.
 - A catch-all `janedoe.com A <websvcs>` record makes websvcs the default for the apex
   and anything unlisted.
 - Internal-only names exist for `pgdb.` (Postgres) and `mqtt.` (Mosquitto); these

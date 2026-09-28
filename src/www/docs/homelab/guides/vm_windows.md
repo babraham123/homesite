@@ -24,7 +24,7 @@ Guide to create a Windows VM.
   - On mac, verify connection
     - install `Windows App`, click Add PC
     - username = `gaming\admin`, login password
-  - Disable login, [ref](https://answers.microsoft.com/en-us/windows/forum/all/how-to-login-automatically-to-windows-11/c0e9301e-392e-445a-a5cb-f44d00289715)
+  - Disable login, [ref](https://web.archive.org/web/20250307115119/https://answers.microsoft.com/en-us/windows/forum/all/how-to-login-automatically-to-windows-11/c0e9301e-392e-445a-a5cb-f44d00289715)
 - Install apps
   - Enable copy-paste: win R, `rdpclip.exe`, enter
   - Launch shell: win R, `PowerShell`, ctrl shift enter
@@ -76,8 +76,9 @@ Create a mechanism to programmatic execute commands remotely. These commands are
 - Install the homelab source code
 ```bash
 # From your local machine
-tools/render_src.sh /tmp/homelab-rendered
-tools/upload_src.sh gaming /tmp/homelab-rendered
+out=$(mktemp -d)/homelab-rendered
+tools/render_src.sh "$out"
+tools/upload_src.sh gaming "$out"
 ssh admin@gaming
 ```
 - Create autoadmin user, enable key based access

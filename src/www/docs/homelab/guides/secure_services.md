@@ -53,8 +53,9 @@ journalctl -eu authelia
   - Navigate to `ldap.janedoe.com` and login
     User = admin, get the password below
     `/usr/local/bin/get_secret.sh lldap_admin_password`
-  - Add regular users, add them to the `lldap_password_manager` group
-    - jane, jayden, jasper,  (note for future: add_more_users)
+  - Add regular users, add them to the `lldap_password_manager` group, (note for future: add_more_users)
+    - jane
+    - jane, jayden, jasper, 
   - Create the `authelia_gen_access`, `headscale_access` and `command_general` groups, add users to them
   - Create the `grafana_admin`, `hass_admin` and `command_admin` groups, add your user to it
   - Uncomment out the authelia middleware
@@ -64,38 +65,14 @@ journalctl -eu authelia
 
 ## Ntfy
 
-- Create users, [ref](https://docs.ntfy.sh/config/#users-and-roles)
+- Users, access control and tokens are provisioned from the config file (`auth-users`, `auth-access`, `auth-tokens`), [ref](https://docs.ntfy.sh/config/#users-via-the-config)
+  - Existing users and tokens with the same name/value (e.g. created via the CLI) are adopted on restart. Any entry not tagged `server config` below is a leftover and should be removed.
+- Lock down the databases and confirm the users are marked `server config`
 ```bash
 chmod 600 /var/opt/ntfy/*.db*
 chmod 600 /var/lib/containers/storage/volumes/systemd-ntfydb/_data/*.db*
-/usr/local/bin/get_secret.sh ntfy_admin_password
-/usr/local/bin/get_secret.sh ntfy_alert_password
-/usr/local/bin/get_secret.sh ntfy_hass_password
-/usr/local/bin/get_secret.sh ntfy_person_password
-podman exec -it ntfy sh
-```
-```bash
-ntfy user add --role=admin admin
-ntfy user add alert
-ntfy access alert "alert*" rw
-ntfy access alert "comment*" rw
-ntfy user add hass
-ntfy access hass "hass*" rw
-ntfy user add person
-ntfy access person "hass*" ro
-ntfy access person "chat*" rw
-# save for later
-ntfy token add alert
-exit
-```
-- Record access token as a secret on pve1
-```bash
-ssh manualadmin@pve1
-sudo su
-/root/homelab-rendered/src/pve1/secret_update.sh secsvcs
-/root/homelab-rendered/src/pve1/secret_update.sh websvcs
-exit
-exit
+podman exec ntfy ntfy access
+podman exec ntfy ntfy token list
 ```
 
 ## Debugging (optional)
