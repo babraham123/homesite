@@ -2,12 +2,12 @@
 Setup a MacOS based computer to access homelab services, both remotely and locally. Also optimizes the Terminal app to access VM hosts and work on homelab code.
 
 ## Dependencies
-- Install xcode, homebrew, pip, git and other dependencies
+- Install xcode, homebrew, pipx, git and other dependencies
 ```bash
 xcode-select --install
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install python pipx
 python3 --version
-python3 -m ensurepip --upgrade
 git --version
 ```
 
@@ -38,8 +38,9 @@ wget -O .vimrc https://raw.githubusercontent.com/amix/vimrc/master/vimrcs/basic.
 ## Source code
 - Install tools
 ```bash
-brew install fd yq yamllint
-pip3 install jinjanator jinjanator-plugin-ansible passlib "bcrypt==4.0.1"
+brew install fd yq yamllint jq shellcheck
+pipx install jinjanator
+pipx inject jinjanator jinjanator-plugin-ansible passlib "bcrypt==4.0.1"
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
@@ -48,11 +49,12 @@ curl -fsSL https://claude.ai/install.sh | bash
 cd ~/Documents
 git clone https://github.com/babraham123/homelab homelab
 cd homelab
+git config core.hooksPath .githooks
 # Fill in personal details based on vars.template.yml
 vim vars.yml
-tools/render_src.sh ../homelab-rendered
+tools/render_src.sh /tmp/homelab-rendered
 
-cd ../homelab-rendered/src
+cd /tmp/homelab-rendered/src
 cp debian/aliases.zsh ~/.oh-my-zsh/custom
 cp debian/functions.zsh ~/.oh-my-zsh/custom
 cp macos/ssh.config ~/.ssh/config

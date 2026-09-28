@@ -52,6 +52,9 @@ grep -r "IP=" src/*/*.container.j2
 
 `nginx` serves static content out of `/var/opt/nginx/www`, mapped by subdomain
 (`www/`, `wifi/`, and shared `error/` pages; see `src/nginx/nginx.conf.j2`).
+`www` is a symlink to one of `/var/opt/nginx/releases/<UTC timestamp>/`, so a deploy or
+rollback is an atomic symlink swap; the container mounts all of `/var/opt/nginx` at
+`/srv` so the link resolves inside it.
 That content is **not** in this repo: one example is the separate
 [homesite](https://github.com/babraham123/homesite) repo, which builds and deploys via
 its own `tools/deploy_src.sh`. This repo owns only the nginx config and quadlet.
@@ -167,9 +170,21 @@ reinstalling a service. See [Security](security.md#host-access-the-ssh-dispatche
   backups over redundancy.
 - **Proxmox Backup Server** (`pbs2`, on pve2) backs up VM disks with prune/GC
   schedules.
+- `ssh autoadmin@secsvcs pg_dumpall` writes a logical Postgres dump to
+  `/var/opt/backups/postgres/` on secsvcs (last 14 kept), so the next VM backup carries
+  an application-consistent copy. Restore into a fresh container with
+  `zstd -dc FILE | podman exec -i CONTAINER psql -U postgres`.
 - pfSense uses the Auto Config Backup package; PVE/PBS `/etc` is tarballed
   separately.
 - Podman volume backup is a documented manual procedure (stop services in reverse
   order, archive volumes; see [the Podman guide](guides/podman.md));
   VictoriaMetrics has its own backup procedure in
   [the secure services guide](guides/secure_services.md).
+- Home Assistant: `ssh autoadmin@homesvcs backup_hass` calls HA's `backup.create`
+  and copies the `.tar` to `/var/opt/backups/hass/` (last 8 kept), so it rides in
+  the VM backup. Restore from Settings >> System >> Backups; recorder history
+  (`hassdb`) is not in the archive.
+- VPS: no vzdump covers it, so `ssh autoadmin@vpn backup_full` tars its whole root
+  filesystem, with a consistent Headscale DB snapshot, to `/var/opt/backups/full/` on
+  vpn (last 2 kept) for pve1 to pull. Restore steps in
+  [the VPN guide](guides/vpn.md#backup-and-restore).

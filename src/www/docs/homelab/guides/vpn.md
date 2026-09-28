@@ -48,7 +48,7 @@ fail2ban-client -d | grep sshd
 ```
 
 ### VPN setup
-- Setup Headscale ([src](https://headscale.net/running-headscale-linux/))
+- Setup Headscale ([src](https://headscale.net/stable/setup/install/official/))
 ```bash
 mkdir -p /etc/opt/secrets
 chmod 711 /etc/opt/secrets
@@ -61,7 +61,7 @@ systemctl restart headscale
 - Create pre-auth key
 ```bash
 headscale completion bash > /etc/bash_completion.d/headcompletion
-headscale users create admin@
+headscale users create admin
 headscale --user USER_ID preauthkeys create --expiration 100y
 ```
 
@@ -69,7 +69,7 @@ headscale --user USER_ID preauthkeys create --expiration 100y
 - For home network, use Tailscale plugin on pfSense ([src](https://www.wundertech.net/how-to-set-up-tailscale-on-pfsense/), [ref](https://davidisaksson.dev/posts/tailscale-on-pfsense/))
   - Install the Tailscale package (Go to System >> Package Manager)
   - Go to VPN >> Tailscale
-  - Setup as an [Exit Node](https://headscale.net/exit-node/) for the desired subnet
+  - Setup as an [Exit Node](https://headscale.net/stable/ref/routes/#exit-node) for the desired subnet
   - Restart pfSense ([issue](https://github.com/tailscale/tailscale/issues/7780))
   - On the VPN server, enable pfSense's routes, [ref](https://headscale.net/stable/ref/routes/)
 ```bash
@@ -180,6 +180,16 @@ COMMIT
 ufw enable
 ufw status verbose
 ```
+- Point the telemetry names at secsvcs over the tailnet. Publicly they resolve to the VPS
+  itself, so without this the VPS's metrics and logs would loop through HAProxy's public
+  frontend. The ufw rule above already allows the traffic.
+```bash
+cat >> /etc/hosts <<'EOF'
+# homelab: telemetry endpoints on secsvcs, reached over the tailnet
+192.168.4.20 metrics.janedoe.com logs.janedoe.com alert.janedoe.com push.janedoe.com
+EOF
+getent hosts metrics.janedoe.com   # should print 192.168.4.20
+```
 
 ### Optimize search results
 
@@ -210,7 +220,7 @@ systemctl start geoip_generator.service
 ## Machine users (optional)
 - Create user and key
 ```bash
-headscale users create USERNAME@
+headscale users create USERNAME
 headscale --user USER_ID preauthkeys create --expiration 1h
 ```
 
@@ -235,16 +245,87 @@ sudo tailscale up --login-server https://vpn.janedoe.com:443 --accept-routes --a
 
 - In cloud VM, check connected nodes: `sudo headscale nodes list`
 
+## ACL policy
+`src/headscale/headscale_acl.hujson.j2` is installed as `/etc/headscale/acl.hujson` by
+`src/vpn/install_svcs.sh headscale`. Membership comes from `vars.yml` (`users`,
+`tailscale_admin`, `tailscale_extra_acls`). Every user referenced must exist in
+`headscale users list` with that exact name (no trailing `@`; the `@` is only in the
+policy).
+```bash
+# after tools/upload_src.sh vpn ...
+cd /root/homelab-rendered/src
+cp headscale/headscale_acl.hujson /etc/headscale/acl.hujson
+headscale policy check --file /etc/headscale/acl.hujson --bypass-grpc-and-access-database-directly
+systemctl reload headscale        # SIGHUP reloads the policy; a failing check is rejected
+journalctl -eu headscale --no-pager | tail -20
+```
+- `policy check` with the bypass flag resolves users against the database and runs the
+  policy's `tests` block. Without the flag it only parses.
+- Spot-check from a node: `tailscale debug netmap | jq '.PacketFilter'` shows the
+  rules that node received; `nc -zv HOST PORT` from an allowed and a denied source.
+
+## Guest users
+Visitors get the `guest1` user: HTTP/HTTPS to the service VMs and Moonlight streaming
+from the gaming VM (no exit node, no LAN, no Proxmox/pfSense GUIs, no Sunshine web UI),
+per `group:guests` in `src/headscale/headscale_acl.hujson.j2`. Authelia still gates each
+app. Hand out a short-lived key per visit.
+```bash
+headscale users create guest1
+headscale --user USER_ID preauthkeys create --expiration 1h
+```
+- On the guest's device, log in as in "Machine users" but **without** `--accept-routes`
+  unless they need a LAN address directly; the site's web apps resolve to the VPS anyway.
+- Moonlight: the guest adds the gaming VM by its LAN IP (needs `--accept-routes`), then
+  you approve the pairing PIN in the Sunshine web UI, which guests can't reach.
+- To revoke: `headscale nodes list --user USER_ID`, then `headscale nodes delete -i NODE_ID`.
+
+## Telemetry
+- Enable routing over tailnet
+```bash
+tee -a /etc/hosts <<'EOF'
+
+# homelab: telemetry endpoints on secsvcs, reached over the tailnet
+192.168.4.20 metrics.janedoe.com logs.janedoe.com alert.janedoe.com push.janedoe.com
+EOF
+```
+
+## Backup and restore
+Archive the whole root filesystem, with a consistent snapshot of the Headscale DB, to
+`/var/opt/backups/full/vpn-full-TIMESTAMP.tar.zst` (newest 2 kept). Only the copy
+pulled off the box survives losing the VPS.
+```bash
+# From pve1
+ssh -p 2202 autoadmin@vpn backup_full
+scp -P 2202 'autoadmin@vpn:/var/opt/backups/full/vpn-full-*.tar.zst' /root/backups/
+```
+
+- Restore one file, e.g. the Headscale DB
+```bash
+mkdir /tmp/restore
+zstd -dc vpn-full-TIMESTAMP.tar.zst | tar -x -C /tmp/restore ./var/lib/headscale/db.sqlite
+# on vpn: systemctl stop headscale, replace db.sqlite, delete db.sqlite-wal/-shm, start
+```
+
+- Restore the whole VPS onto a new Linode
+  - Create a Linode with the same Debian release, power it off, and boot it into
+    [Rescue Mode](https://techdocs.akamai.com/cloud-computing/docs/rescue-and-rebuild)
+    with its disk as `/dev/sda`. Keep Network Helper on: it rewrites the restored
+    network config for the new IP at boot.
+  - In the Lish console: `passwd && systemctl start ssh`
+  - From pve1, wipe the fresh image and stream the archive in. It's decompressed on
+    pve1 because the rescue system runs from RAM.
+```bash
+ssh root@NEW_IP 'mkdir -p /media/sda && mount /dev/sda /media/sda && rm -rf /media/sda/*'
+zstd -dc vpn-full-TIMESTAMP.tar.zst | \
+  ssh root@NEW_IP 'tar -x --numeric-owner --acls --xattrs -C /media/sda'
+# The new disk has a new filesystem UUID; regenerate the boot config for it
+ssh root@NEW_IP 'cd /media/sda && for d in dev proc sys; do mount --bind /$d $d; done && chroot . update-grub'
+```
+  - Reboot out of Rescue Mode. If the public IP changed, update `vpn.ip` in
+    `vars.yml`, the `vpn` A record, and redeploy. Tailnet nodes reconnect on their own:
+    the Headscale DB, noise key and SSH host keys are the originals.
+
 ## Upgrade
 [Headscale docs](https://github.com/juanfont/headscale/blob/main/docs/setup/upgrade.md)
 
-- Backup the headscale DB
-```bash
-sudo su
-systemctl stop headscale
-cd /root/backups
-cp /var/lib/headscale/db.sqlite* .
-tar -czf db-$(date -I).tar.gz db.sqlite*
-rm db.sqlite*
-systemctl start headscale
-```
+- Back up first: `ssh -p 2202 autoadmin@vpn.janedoe.com backup_full`

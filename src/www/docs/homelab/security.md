@@ -52,10 +52,13 @@ An embedded DERP relay covers peers that can't hole-punch.
 group-based Headscale ACL matrix exists in
 `src/headscale/headscale_acl.hujson.j2`
 but is marked "not currently in use" and the active policy is permissive (each
-enrolled user gets broad access). The blocker is narrower than "ACLs don't work on
-FreeBSD" implies: FreeBSD (pfSense) still can't disable SNAT on subnet routes, so
-routed LAN traffic loses real source IPs at the router boundary; Headscale's ACL
-policy engine itself is unaffected. Enforced segmentation today
+enrolled user gets broad access). SNAT does not block the matrix: Tailscale enforces
+ACLs in its OS-independent packet filter (`net/tstun`) on the tailnet address, before
+netstack SNATs the flow, so it works on pfSense today; re-enabling it is
+`planning/router/issues/03-headscale-acl-matrix.md`. SNAT only hides tailnet clients'
+addresses from the LAN side (pfSense VLAN rules, logs, Traefik). Kernel routing
+without SNAT is available on pfSense now via `TS_DEBUG_NETSTACK_SUBNETS=0`
+(`planning/router/issues/04-tailscale-no-snat.md`). Enforced segmentation today
 comes from pfSense VLAN firewall rules and Authelia's application-layer policies,
 not from the mesh.
 
@@ -128,9 +131,9 @@ flowchart TB
 
     subgraph public["Public TLS (browser-facing)"]
         direction TB
-        le["Let's Encrypt via Traefik<br/>HTTP-01, cert per subdomain"]
+        le["Let's Encrypt via Traefik on each service VM<br/>HTTP-01, cert per subdomain"]
         dumper["traefik-certs-dumper on pve1"]
-        xfer["acme_transfer.sh →<br/>other nodes' Traefik instances"]
+        xfer["acme_transfer.sh →<br/>pve1, pve2, pbs2, pfSense"]
         le -- "issues" --> dumper -- "distributes" --> xfer
     end
 
@@ -156,8 +159,9 @@ flowchart TB
 - **SSH host certs** eliminate trust-on-first-use: clients trust the CA once and every
   node's host key verifies automatically. A separate script handles the Windows
   gaming VM.
-- **Public TLS**: Traefik on pve1 answers ACME challenges; the resulting certs are
-  dumped and redistributed to the other nodes' Traefik instances.
+- **Public TLS**: Traefik on each service VM (secsvcs, homesvcs, websvcs) answers ACME
+  challenges; `acme_transfer.sh` on pve1 pulls their `acme.json` files, dumps the certs
+  and installs them on pve1, pve2, pbs2 and pfSense.
 - **Expiry monitoring**: the `cert_notifier` timer on pve1 emails weeks in advance;
   Gatus and vmalert also alert on approaching expiry. Rotation cadence lives in
   [Maintenance](maintenance.md#refresh-certificates).
@@ -171,16 +175,17 @@ accounts with sharply different powers:
 - **`manualadmin`** is interactive SSH for a human: file uploads, exploratory work,
   full sudo with password.
 - **`autoadmin`** is the automation account. Its SSH key is bound to a `ForceCommand`
-  script, `src/secsvcs/dispatcher.sh`, which whitelists a fixed
+  script, `src/<node>/dispatcher.sh`, which whitelists a fixed
   set of `$SSH_ORIGINAL_COMMAND` strings (`install_traefik`, `install_all_svcs`,
-  `copy_acme_certs`, …) and rejects everything else. Its sudoers entry, generated at
-  render time from the dispatcher's own command list (`tools/parse_dispatcher.sh` →
-  `sudoers.j2`), grants NOPASSWD for exactly those commands.
+  `copy_acme_certs`, …) and rejects everything else. The dispatcher and its sudoers
+  entry are both rendered from the node's entries in `src/nodes.yml`, so sudo grants
+  NOPASSWD for exactly the whitelisted commands.
 
 So automation (OliveTin buttons, deploy scripts, cert distribution) can trigger
 predefined actions remotely, but a stolen `autoadmin` key cannot run arbitrary
-commands. `tools/gen_dispatch_cmds.sh` regenerates dispatcher cases from
-`install_svcs.sh` so the whitelist stays in sync with the services that exist.
+commands. The render fails if a node's `services` in `src/nodes.yml` differ from its
+`install_svcs.sh` cases, so the whitelist stays in sync with the services that exist
+(see [ADR 0006](adr/0006-node-inventory.md)).
 
 ## Secrets
 
@@ -201,7 +206,8 @@ SOPS + AGE, kept out of git and written to disk encrypted (see
   `chmod 400`. These rendered configs are the only place plaintext sits on disk; the
   rendered tree itself only ever holds templates.
 - pve1's AGE key is the single point of failure; a lost VM key can be replaced by
-  rerunning `secret_update.sh`.
+  rerunning `secret_update.sh`. What must be kept off pve1, and how to recover each
+  trust root, is in [pve1 disaster recovery](guides/pve1_recovery.md).
 - Rotation: `src/pve1/secret_update.sh <host>` edits the SOPS file, re-encrypts and
   redistributes it, and recreates the Podman placeholders; then restart affected
   services.
@@ -221,4 +227,4 @@ open. Headscale admin operations happen over localhost, not the public interface
   there; containment relies on VLAN firewall rules.
 - Wired VLAN enforcement waits on a managed switch.
 
-These are tracked as issues under `.scratch/`.
+These are tracked as issues under `planning/`.
