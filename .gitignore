@@ -12,3 +12,8 @@ node_modules
 !assets/.keep
 assets/*
 .cache
+
+# Python
+__pycache__/
+*.pyc
+.venv
