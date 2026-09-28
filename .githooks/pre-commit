@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Builds the site strictly (fails on broken internal links and missing nav targets),
+# then checks every link and anchor between the built pages. Checks the working tree.
+# Activate with: git config core.hooksPath .githooks
+# Skip once with: git commit --no-verify
+
+set -euo pipefail
+
+command -v lychee > /dev/null || { echo "pre-commit: lychee not installed (brew install lychee)" >&2; exit 1; }
+
+site=$(mktemp -d)
+trap 'rm -rf "$site"' EXIT
+
+log="$site.log"
+if ! tools/mkdocs.sh build --strict -d "$site" > "$log" 2>&1; then
+  grep -E 'WARNING|ERROR|Aborted' "$log" >&2 || cat "$log" >&2
+  rm -f "$log"
+  exit 1
+fi
+rm -f "$log"
+
+# Pages link root-relative (/assets/...), which lychee resolves against --root-dir.
+lychee --offline --include-fragments --no-progress --root-dir "$site" "$site"
