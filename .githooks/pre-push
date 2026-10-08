@@ -2,10 +2,12 @@
 # Checks external links in the site's own pages. Too slow for every commit.
 # The synced homelab docs are skipped: their links belong to the homelab repo, and
 # they point at example hosts (janedoe.com, private IPs) that never resolve.
+# Links to bket.net are skipped too: they point at this site, so they'd fail whenever
+# it's down, and pre-commit already checks the built site offline.
 # Skip once with: git push --no-verify
 
 set -euo pipefail
 
 command -v lychee > /dev/null || { echo "pre-push: lychee not installed (brew install lychee)" >&2; exit 1; }
 
-lychee --accept 200,429 --no-progress --exclude-path src/www/docs/homelab 'src/www/docs/**/*.md'
+lychee --accept 200,429 --no-progress --exclude-path src/www/docs/homelab --exclude '^https?://(www\.)?bket\.net' 'src/www/docs/**/*.md'
