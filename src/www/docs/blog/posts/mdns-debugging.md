@@ -14,7 +14,7 @@ categories:
 
 # When mDNS Breaks Everything: A Cross-VLAN Debugging Story
 
-After a network reconfiguration, Zigbee2MQTT couldn't reach the MQTT broker anymore. Home Assistant entities went stale, automations stopped running, and the smart lights stopped being smart. The broker was healthy and the firewall rules were correct. The problem looked like three different things before it turned out to be two other problems stacked on top of each other.
+After a network reconfiguration, Zigbee2MQTT couldn't reach its Zigbee coordinator anymore. Home Assistant entities went stale, automations stopped running, and the smart lights stopped being smart. The coordinator was powered up and the firewall rules were correct. The problem looked like three different things before it turned out to be two other problems stacked on top of each other.
 
 I [wrote previously](vlans-and-mdns.md) about how VLAN segmentation breaks mDNS discovery and the repeater setup that fixes it. This follow-up is about what debugging that setup looks like when it fails without any errors.
 
@@ -27,7 +27,7 @@ I [wrote previously](vlans-and-mdns.md) about how VLAN segmentation breaks mDNS 
 
 ## The symptom
 
-Zigbee2MQTT finds the broker through mDNS (`_mqtt._tcp.local`) and was logging a connection refusal. Services in my lab find each other through advertisements instead of hardcoded IPs, so changing an IP doesn't break any configs. That's convenient until discovery itself breaks, because mDNS failures don't produce errors. Things just don't show up.
+Zigbee2MQTT finds its network Zigbee coordinator (an SLZB-06) through mDNS (`_slzb-06._tcp.local`) and was logging that the coordinator was unreachable. It looks the coordinator up by its advertisement instead of a hardcoded IP, so changing the IP doesn't break any configs. That's convenient until discovery itself breaks, because mDNS failures don't produce errors. Things just don't show up.
 
 ## Hypothesis 1: the firewall (wrong)
 
@@ -37,7 +37,7 @@ That was the first real lesson: with mDNS, start with tcpdump right away. Captur
 
 ## Hypothesis 2: the repeater (half right)
 
-The mdns_repeater service forwards multicast traffic across the boundary. `systemctl status` showed it running with no errors. But its config binds to interfaces by name, and the network reconfiguration had changed a Linux interface name (`eth0` → `enp2s0`-style predictable naming). The repeater was listening on an interface that no longer existed and not reporting any problem. I updated the config and restarted it, and tcpdump confirmed packets were now crossing the boundary.
+The mdns_repeater service copies multicast traffic between the VM's network card and the container network. `systemctl status` showed it running with no errors. But its config binds to interfaces by name, and the network reconfiguration had changed a Linux interface name (`eth0` → `enp2s0`-style predictable naming). The repeater was listening on an interface that no longer existed and not reporting any problem. I updated the config and restarted it, and tcpdump confirmed packets were now crossing the boundary.
 
 Discovery still failed.
 
@@ -53,15 +53,17 @@ systemctl disable --now avahi-daemon
 
 After that, the lights worked again.
 
-## A 20-line probe script
+## A 30-line probe script
 
-Debugging this by restarting Zigbee2MQTT over and over was painful. Each cycle was slow and the logs were noisy. To avoid that in the future I wrote a small Node.js probe using the `multicast-dns` package. You give it a service type and an interface, and it sends one query and prints every response.
+Debugging this by restarting Zigbee2MQTT over and over was painful. Each cycle was slow and the logs were noisy. To avoid that in the future I wrote a small Node.js probe using the `multicast-dns` and `bonjour-service` packages. It sends a couple of queries for the coordinator and prints every response. I run it from a throwaway container on the same Podman network as the app, so it sees exactly what the app sees:
 
 ```bash
-node mdns.js _mqtt._tcp.local eth0
+podman run --rm -it --network=systemd-net docker.io/library/node:lts-trixie-slim bash
+npm install -g multicast-dns bonjour-service
+NODE_PATH=$(npm root -g) node   # then paste in mdns.js
 ```
 
-Running it from any VLAN shows exactly what's discoverable from there. I can test the repeater, the firewall, and the advertiser separately without involving production services. It lives in the repo's `test/` directory and has saved me time on several problems since.
+Running it from different networks shows exactly what's discoverable from each. I can test the repeater, the firewall, and the advertiser separately without involving production services. It lives in the repo's `test/` directory and has saved me time on several problems since.
 
 ## Lessons
 

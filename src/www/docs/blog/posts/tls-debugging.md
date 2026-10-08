@@ -74,4 +74,4 @@ There was one more problem after that. Services on the same VM as Authelia could
 
 ## Still unfinished
 
-My original goal was mutual TLS on the LDAP connection, with both server and client certificates. That's still disabled in my config with a `TODO` until I do another round of certificate fixes, so the connection is encrypted but doesn't use client certs. I still think internal TLS is worth doing in a homelab. Each certificate is a small agreement about names and trust, though, and when one side gets it wrong you end up debugging. With this process it takes me minutes instead of whole evenings.
+My original goal was mutual TLS on every internal hop, with both server and client certificates. Traefik already presents a client certificate to Authelia, but Authelia's check for it is still commented out with a `TODO` until I do another round of certificate fixes, so that hop is encrypted but doesn't verify client certs. I still think internal TLS is worth doing in a homelab. Each certificate is a small agreement about names and trust, though, and when one side gets it wrong you end up debugging. With this process it takes me minutes instead of whole evenings.

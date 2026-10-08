@@ -26,21 +26,21 @@ Headscale is an open-source reimplementation of that server. I run it on my VPS,
 
 ## What changes and what doesn't
 
-With Headscale, every device (laptops, phones, VMs) still runs the normal Tailscale client, just pointed at your own coordination URL. The WireGuard mesh and NAT traversal work the same as before. You take over node enrollment (through the CLI), ACL policy (a HuJSON file), and relaying.
+With Headscale, every device (laptops, phones, VMs) still runs the normal Tailscale client, just pointed at your own coordination URL. The WireGuard mesh and NAT traversal work the same as before. You take over node enrollment (CLI pre-auth keys, or SSO login through my identity provider), ACL policy (a HuJSON file), and relaying.
 
-In my setup Headscale shares the VPS with HAProxy, which routes `vpn.<domain>` traffic to it by SNI.
+In my setup Headscale shares the VPS (vpnsvcs) with HAProxy, which routes `vpn.<domain>` traffic to it by SNI.
 
 ## A homemade Funnel
 
 Tailscale Funnel lets a device on your tailnet accept traffic from the public internet, relayed through Tailscale's servers. Headscale doesn't have Funnel, so I built the equivalent on the VPS.
 
-Besides Headscale, the VPS also runs a regular Tailscale client, logged in as a dedicated `public` user and started with `--accept-routes` so it can reach the home subnet. HAProxy takes public traffic on ports 80 and 443 and forwards it through that client into the tailnet. Hostnames for services on the secsvcs VM (SSO, monitoring) and the homesvcs VM (Home Assistant) go to those VMs. Everything else goes to the websvcs VM, where Traefik passes the main site to the nginx container that serves it.
+Besides Headscale, the VPS also runs a regular Tailscale client, logged in as a dedicated `public` user and started with `--accept-routes` so it can reach the home subnet. HAProxy takes public traffic on ports 80 and 443 and forwards it through that client into the tailnet. My home services are split across three VMs: secsvcs (identity and monitoring), homesvcs (home automation), and websvcs (web apps, including this site). Hostnames for secsvcs and homesvcs services go to those VMs, and everything else goes to websvcs, where Traefik passes the main site to the nginx container that serves it.
 
-This is what makes the [three-tier ingress design](haproxy-chokepoint.md) work. My home network doesn't accept any inbound connections from the internet. Public traffic only gets in over the WireGuard tunnel that the VPS's client is part of. Since the mesh ACLs are currently off (more on that below), ufw on the VPS limits what that client can reach: outbound traffic on `tailscale0` is only allowed to ports 80 and 443 on those three VMs.
+This is what makes the [three-layer ingress design](private-cloud-at-home.md#how-traffic-gets-in) work. My home network doesn't accept any inbound connections from the internet. Public traffic only gets in over the WireGuard tunnel that the VPS's client is part of. Since the mesh ACLs aren't enforced yet (more on that below), ufw on the VPS limits what that client can reach: outbound traffic on `tailscale0` is only allowed to ports 80 and 443 on those three VMs.
 
 ## Don't skip the DERP relay
 
-Tailscale prefers direct peer-to-peer WireGuard connections, but some NAT setups, like carrier-grade NAT or strict corporate firewalls, can't be traversed. In those cases traffic falls back to a DERP relay. If you self-host coordination you should self-host a relay too, or those peers won't be able to connect. Headscale has a built-in DERP server that you enable with a config block, and the relay map is sent to clients automatically. The relay only forwards encrypted packets, so even as the operator you can't read the traffic.
+Tailscale prefers direct peer-to-peer WireGuard connections, but some NAT setups, like carrier-grade NAT or strict corporate firewalls, can't be traversed. In those cases traffic falls back to a DERP relay. If you self-host coordination, it's worth self-hosting a relay too. Headscale has a built-in DERP server that you enable with a config block, and the relay map is sent to clients automatically. I run it alongside Tailscale's public relays, so peers get a relay close to home with fallbacks elsewhere. The relay only forwards encrypted packets, so even as the operator you can't read the traffic.
 
 ## The bug that ate a weekend
 
@@ -56,13 +56,14 @@ watch -n 0.5 tailscale status # direct vs. relayed, live
 
 The fix was to change the architecture. I stopped using a Mac as a subnet router and had a Linux VM on the same subnet advertise the routes instead. Check the Tailscale GitHub issues before assuming your Headscale config is wrong.
 
-## The ACLs are currently off
+## The ACLs are still off
 
-Headscale supports Tailscale-style ACLs, and I wrote a proper group-based policy matrix, but it's disabled and a permissive policy is active instead. The problem is upstream. pfSense runs on FreeBSD, where Tailscale can't disable SNAT on subnet routes, so LAN traffic routed through the mesh loses its real source IP at the router. ACLs can't match on source IPs that have been rewritten. Until that's fixed, network-level enforcement comes from VLAN firewall rules and the SSO layer, and the mesh isn't zero-trust yet. At least it's written down as a tracked issue instead of being forgotten.
+Headscale supports Tailscale-style ACLs, and I've written a group-based policy for admins, family, and guests, with a locked-down rule for the public endpoint and a `tests` block that checks the rules do what I expect. It isn't enabled yet, so for now the mesh is permissive, and network-level enforcement comes from VLAN firewall rules and the SSO layer.
+
+For a long time I blamed pfSense for this. It runs on FreeBSD, where Tailscale can't disable SNAT on subnet routes, so I assumed ACLs couldn't see the real source IP. That turned out to be wrong: Tailscale checks ACLs in its packet filter against the sender's tailnet address, before any SNAT happens. What's left is testing the policy from real guest and family devices before switching it on. SNAT does still mean LAN hosts and pfSense logs see the router's address instead of the real client, and that's a separate tracked issue.
 
 ## What you give up compared to managed Tailscale
 
-- **MagicDNS.** I already run my own DNS (Unbound local zones), so I don't miss it.
 - **The admin web UI.** Everything is done with `headscale` CLI commands, which is fine for one person.
 - **New features.** New Tailscale client features sometimes take a while to get Headscale support.
 - **Funnel.** HAProxy and a Tailscale client on the VPS do the same job, as described above.

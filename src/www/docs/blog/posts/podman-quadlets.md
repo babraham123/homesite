@@ -83,7 +83,7 @@ flowchart LR
     t --> g
 ```
 
-This sounds primitive compared to DNS-based service discovery, and it is, but that's on purpose. Static IPs make everything downstream predictable. Traefik routes, DNS records, and metrics scrape targets are all generated from the same source at deploy time, and the render pipeline fails the build if two containers claim the same IP. It's simple, and I can grep for any address.
+This sounds primitive compared to DNS-based service discovery, and it is, but that's on purpose. Static IPs make everything downstream predictable. DNS records and uptime checks are generated from one inventory file at deploy time, the build checks that they match the Traefik routes, and it fails if two containers claim the same IP. It's simple, and I can grep for any address.
 
 ## Secrets
 

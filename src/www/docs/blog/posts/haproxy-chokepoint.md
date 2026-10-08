@@ -52,7 +52,7 @@ Plain HTTP isn't encrypted, so it gets full request inspection. This is where mo
 
 - **Attack-path filtering.** Requests for `.env`, `.git`, `wp-admin`, `phpmyadmin`, and similar paths are silently dropped. No legitimate visitor has ever asked my server for `/.aws/credentials`.
 - **Sticky banning.** More than 150 requests in 10 seconds flags the source IP in a counter. Once an IP is flagged, all of its traffic is dropped until the table entry expires, even if it slows down. This catches bursts, and it also catches clients that try to throttle themselves to stay under the limit.
-- **Geo-blocking.** A systemd timer converts the MaxMind GeoIP database into per-country map files every day. Requests from countries on my blocklist are dropped with an O(log n) lookup.
+- **Geo-blocking.** A systemd timer converts the MaxMind GeoIP database into per-country map files every week. Requests from countries on my blocklist are dropped with an O(log n) lookup. This filter also runs on the encrypted 443 frontend, since it only needs the source IP.
 
 Most of what gets through is Let's Encrypt HTTP-01 challenges, which pass through to Traefik, and redirects to HTTPS.
 
@@ -60,12 +60,12 @@ Throughout the config I use `silent-drop` instead of returning errors. An error 
 
 ## Hardening the box itself
 
-The VPS has its own hardening: SSH on a nonstandard port with 22 blocked at the firewall, fail2ban, and only four open ports (80, 443, STUN, and WireGuard). Headscale's admin API listens only on localhost.
+The VPS has its own hardening: SSH on a nonstandard port with 22 blocked at the firewall, fail2ban, and only five open ports (SSH, 80, 443, STUN, and WireGuard). Headscale's admin API listens only on localhost.
 
 ## Results
 
 Watching the stick tables live (`echo "show table http_all" | socat stdio /run/haproxy/admin.sock`) is pretty entertaining. There's a steady stream of scanners hitting the path filters and rate limits, and none of it reaches an application. No web framework or container spends CPU on it, because HAProxy discards it first.
 
-This is all filtering at the connection and path level, though. An attack on an actual application bug will look like a normal request, and defending against that is the job of the SSO layer ([previous post](self-hosted-sso.md)) and the apps themselves. The edge has a narrower job, which is getting rid of the noise, and it does that well.
+This is all filtering at the connection and path level, though. An attack on an actual application bug will look like a normal request, and defending against that is the job of the [SSO layer](self-hosted-sso.md) and the apps themselves. The edge has a narrower job, which is getting rid of the noise, and it does that well.
 
-The config template is [`src/haproxy/haproxy.cfg.j2`](https://github.com/babraham123/homelab) in the repo, and ADR 0002 explains the reasoning.
+The config template is [`src/haproxy/haproxy.cfg.j2`](https://github.com/babraham123/homelab) in the repo, and [a design note](https://github.com/babraham123/homelab/blob/main/docs/adr/0002-haproxy-sni-passthrough.md) in the repo explains the reasoning.
