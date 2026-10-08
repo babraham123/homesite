@@ -26,7 +26,7 @@ This post covers my segmentation design, the mDNS problem it causes, and the thr
 
 ## The VLAN layout
 
-pfSense runs as a VM with the router hardware's four NICs passed through to it, and it handles all routing and tagging. The WiFi access point broadcasts three SSIDs, each tagged onto its own VLAN. I use the VLAN ID as the third octet of the subnet, which makes things easy to remember.
+pfSense runs as a VM with the router hardware's four NICs passed through to it, and it handles all routing and tagging. The WiFi access point's SSIDs are each tagged onto one of three VLANs. I use the VLAN ID as the third octet of the subnet, which makes things easy to remember.
 
 | VLAN | Purpose | Subnet |
 |------|---------|--------|
@@ -71,7 +71,7 @@ flowchart TB
 
 If a VM is running `avahi-daemon` (Debian installs it as a dependency of many packages), it will intercept mDNS queries before the repeater sees them. There are no errors anywhere, and discovery just stops working. Disable Avahi on any machine that runs `mdns_repeater`. This cost me an evening the first time, and later a full debugging session that turned into [its own post](mdns-debugging.md).
 
-To check that discovery is working, I keep a small Node.js probe script (`test/mdns.js`) that queries for a service type from a chosen interface. It's much faster than restarting Home Assistant and hoping for the best.
+To check that discovery is working, I keep a small Node.js probe script (`test/mdns.js`) that I run from a throwaway container on the same Podman network as Home Assistant. It sends a few mDNS queries and prints whatever answers, which is much faster than restarting Home Assistant and hoping for the best.
 
 ## Is it worth it?
 

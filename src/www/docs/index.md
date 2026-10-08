@@ -1,4 +1,4 @@
-# assorted nerditry
+# owning the stack, one weekend at a time
 
 Welcome to my website. It's a place to write down the tech projects I spend too much of my free time on, mostly so future me can remember how they work.
 

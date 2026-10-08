@@ -13,9 +13,9 @@ categories:
 
 # Encrypted Homelab Secrets Without a Secrets Manager
 
-My homelab repo is public, and it's written to be generic. Real hostnames, domains, and IPs live in a gitignored `vars.yml`, and the committed examples use placeholder values. Secrets stay out of git for the same reason. Each VM gets one encrypted secrets file on its own disk, and values are decrypted only when a container starts.
+My homelab keeps its secrets encrypted on disk without running a secrets manager. Each VM gets one encrypted secrets file, values are decrypted only when a container starts, and there's no extra service to keep alive. If you run containers on a few machines and want secrets out of git without adopting a whole secrets platform, this setup is small enough to copy.
 
-The pieces are SOPS, AGE, and Podman's shell secrets driver. There's no extra service to run.
+The pieces are SOPS (a tool that encrypts the values in a YAML file but leaves the keys readable), AGE (a simple file-encryption tool with short keys), and Podman's shell secrets driver. My repo is public, so this also keeps real values out of git, the same way real hostnames and IPs live in a gitignored `vars.yml`.
 
 <!-- more -->
 
@@ -26,7 +26,7 @@ The pieces are SOPS, AGE, and Podman's shell secrets driver. There's no extra se
 
 ## Why not a secrets manager?
 
-A dedicated secrets manager is the usual way to handle this, and for a team it's the right choice. For one person it's a lot of overhead. It's a stateful, always-on service with its own authentication, backups, and uptime, and every other service depends on it being reachable at startup. The reasoning is written up in an architecture decision record (ADR 0004).
+A dedicated secrets manager is the usual way to handle this, and for a team it's the right choice. For one person it's a lot of overhead. It's a stateful, always-on service with its own authentication, backups, and uptime, and every other service depends on it being reachable at startup. The reasoning is written up in [a design note](https://github.com/babraham123/homelab/blob/main/docs/adr/0004-sops-age-secrets.md) in the repo.
 
 ## Why not Podman's default secrets?
 
@@ -38,8 +38,10 @@ I still use Podman secrets, just with a different driver.
 
 There are two kinds of secrets files:
 
-- **Source files on pve1.** pve1 holds the trust roots for the whole lab, so it also keeps one secrets file per VM at `/root/secrets/<host>.yaml`. These are SOPS files encrypted to pve1's AGE key. SOPS encrypts only the values and leaves the key names readable, so I can see which secrets a file holds without decrypting it.
+- **Source files on pve1.** pve1 is the always-on Proxmox host that holds the trust roots for the whole lab (its certificate authorities and keys), so it also keeps one secrets file per VM at `/root/secrets/<host>.yaml`. These are SOPS files encrypted to pve1's AGE key. SOPS encrypts only the values and leaves the key names readable, so I can see which secrets a file holds without decrypting it.
 - **A deployed file on each VM.** Each VM has `/etc/opt/secrets/secrets.yaml.age`, encrypted with AGE to two recipients: pve1's key and the VM's own ed25519 SSH key. SOPS can't use SSH keys as recipients, so the update script decrypts the SOPS file and re-encrypts it with the `age` CLI. The VM's private key sits next to the file in a root-only directory.
+
+The one exception is the VPS (vpnsvcs), which doesn't run Podman yet. Its few secrets are root-only plaintext files for now.
 
 Git only has a `secrets_template.yaml` for each VM. It lists every secret name with an empty value, with a comment above each one showing the command I used to generate it. When I rebuild a VM, the template tells me which secrets need to exist.
 
@@ -93,11 +95,11 @@ On pve1, `secret_update.sh <host>` opens that VM's SOPS file in `$EDITOR`. After
 
 ## Tradeoffs
 
-- **pve1's AGE key is the most important key.** It decrypts the source file for every VM. If a VM's key is lost, I can generate a new one and run the update script again. If pve1's key is lost with no backup, I'd have to recover the values from each VM's copy or regenerate them.
-- **Git isn't a backup for secrets.** Rebuilding a VM takes the repo, `vars.yml`, the SOPS files, and pve1's AGE key. Git only has the repo, so the rest need their own backups.
+- **pve1's AGE key is the most important key.** It decrypts the source file for every VM. If a VM's key is lost, I can generate a new one and run the update script again. pve1's key and the SOPS files go to my Proxmox Backup Server every week, but that backup is encrypted with its own key. Until I keep an offline copy of that key, losing both would mean recovering the values from each VM's copy or regenerating them.
+- **Git isn't a backup for secrets.** Rebuilding a VM takes the repo, `vars.yml`, the SOPS files, and pve1's AGE key. Git only has the repo. The rest goes into a weekly host backup of pve1, except the backup encryption key itself, which has to live offline.
 - **There's no audit log.** A secrets manager records who read which secret and when, and a file can't do that. That's fine for one person and a dealbreaker for a team.
 - **Rotation means editing, redistributing, and restarting,** not a live swap. At homelab scale that isn't a problem.
 
 In return, there's no extra service to run and nothing that has to be up before the rest of the lab can start. Quadlets use Podman secrets with the standard syntax, and Podman never stores a plaintext copy.
 
-The scripts are in [the repo](https://github.com/babraham123/homelab). `src/podman/` has the lookup and render scripts and `containers.conf`, `src/pve1/secret_update.sh` handles distribution, and ADR 0004 explains the decision.
+The scripts are in [the repo](https://github.com/babraham123/homelab). `src/podman/` has the lookup and render scripts and `containers.conf`, `src/pve1/secret_update.sh` handles distribution, and the design note explains the decision.

@@ -17,3 +17,9 @@ assets/*
 __pycache__/
 *.pyc
 .venv
+
+# AI artifacts
+.scratch
+.claude/settings.local.json
+.claude/worktrees
+CLAUDE.local.md

@@ -13,7 +13,7 @@ categories:
 
 # Building a Private Cloud at Home
 
-A few years ago I started wondering how much of my digital life could run on hardware I own. It turned out to be almost all of it: identity, monitoring, home automation, game streaming, and remote access. It all runs on two Proxmox hosts in a closet, with a $5 VPS handling public traffic.
+Almost all of my digital life runs on hardware I own: identity, monitoring, home automation, game streaming, and remote access. It fits on two Proxmox hosts in a closet, with a $5 VPS handling public traffic. If you're planning a homelab of your own, this is the architecture and the tradeoffs behind it.
 
 This post is an overview, and later posts cover each layer in more detail. Everything described here is in a public repo at [github.com/babraham123/homelab](https://github.com/babraham123/homelab), and the whole system deploys with one command.
 
@@ -38,14 +38,14 @@ Every homelab is shaped by its constraints. These are mine:
 
 **pve2** is a custom tower with an i5-13500, an RTX 3060 Ti for the Windows gaming VM, a Tesla P4 for the voice pipeline, and a Coral TPU for camera object detection. It idles around 30 W, but it's usually turned off. An OliveTin button wakes it up when I want to play games or need the GPU.
 
-**vpn** is the smallest Linode instance available, and it's the only machine with a public IP.
+**vpnsvcs** is the smallest Linode instance available, and it's the only machine with a public IP.
 
 ## How it fits together
 
 ```mermaid
 flowchart TB
     inet(("Internet"))
-    subgraph vps["Linode VPS (public IP)"]
+    subgraph vps["vpnsvcs: Linode VPS (public IP)"]
         haproxy["HAProxy :80/:443<br/>SNI routing, rate limiting"]
         headscale["Headscale + DERP"]
     end
@@ -69,7 +69,7 @@ flowchart TB
 
 There are six VMs, and each one has a single job: `router` (pfSense, with all four physical NICs passed through over PCI), `secsvcs` (Authelia, LLDAP, and the metrics stack), `homesvcs` (Home Assistant, MQTT, and Zigbee), `websvcs` (user-facing apps), `devtop` (a Linux desktop), and `gaming` (Windows with GPU passthrough).
 
-I use VMs instead of running containers directly on the host to limit the damage when something goes wrong. Each VM has its own Traefik ingress, container subnet, and snapshot schedule, so a bad deploy or a compromise stays inside one VM.
+I use VMs instead of running containers directly on the host to limit the damage when something goes wrong. Each VM has its own Traefik ingress and container subnet, so a bad deploy or a compromise stays inside one VM.
 
 The three VMs that run containers host about 30 services as Podman quadlets, which are systemd unit files that run containers. There's no Kubernetes and no Compose daemon. That decision gets [its own post](podman-quadlets.md).
 
@@ -85,13 +85,13 @@ Inside the house, split-horizon DNS lets Unbound resolve the same hostnames dire
 
 ## One command to deploy
 
-The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, and a set of parse scripts generate the repetitive parts: DNS records from Traefik routes, metrics scrape targets from service configs, and sudoers entries from the command whitelist. Validation (YAML lint and duplicate-IP checks) runs first, and then `deploy_src.sh` pushes everything to every node.
+The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, plus a small node inventory (`src/nodes.yml`) that lists each machine's services and commands. The repetitive parts are generated from that list: DNS and SNI routing entries, uptime checks, OliveTin buttons, and the sudoers and dispatcher whitelists. Validation runs before anything ships: YAML lint, duplicate-IP checks, and a check that the inventory matches the install scripts and Traefik routes. Then `deploy_src.sh` pushes everything to every node.
 
-Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE, and values are decrypted when a container starts. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a whitelisted set of actions. Both of these will get their own posts.
+Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE, and values are decrypted when a container starts. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a whitelisted set of actions. Both have their own posts: [secrets](encrypted-secrets.md) and [the dispatcher](ssh-dispatcher.md).
 
 ## Known gaps
 
-This isn't a zero-trust network yet. I wrote a group-based Headscale ACL matrix, but it's disabled because a FreeBSD SNAT limitation rewrites source IPs on subnet routes. For now the mesh policy is permissive, and the real enforcement comes from VLAN firewall rules and the SSO layer. Wired VLAN segmentation is waiting on a managed switch. Backups cover VM disks but don't support file-level restores yet.
+This isn't a zero-trust network yet. The Headscale ACL policy is written but not enabled yet, so for now the mesh is permissive, and the real enforcement comes from VLAN firewall rules and the SSO layer. Wired VLAN segmentation is waiting on a managed switch. The VPS isn't monitored yet, and most alert rules still only watch the monitoring stack itself.
 
 Writing down the gaps turned out to be as useful as documenting the architecture. About half of them became tracked issues with actual plans.
 

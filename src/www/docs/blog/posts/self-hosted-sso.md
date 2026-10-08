@@ -26,7 +26,7 @@ Mine is built from LLDAP, Authelia, and Traefik. It's all self-hosted, with no "
 
 ## The stack
 
-**LLDAP** is the user directory. It stores users and groups and has a clean web UI, without the decades of complexity that come with OpenLDAP. **Authelia** does most of the work. It reads users from LLDAP, serves the login portal, handles TOTP and passkeys, and acts as an OIDC provider. It's backed by **Postgres** so sessions survive restarts. **Traefik** enforces all of this by refusing to pass a request upstream until Authelia approves it.
+**LLDAP** is the user directory. It stores users and groups and has a clean web UI, without the decades of complexity that come with OpenLDAP. **Authelia** does most of the work. It reads users from LLDAP, serves the login portal, handles TOTP and passkeys, and acts as an OIDC provider. It's backed by **Postgres**, which stores TOTP and passkey registrations and OIDC state so they survive restarts. **Traefik** enforces all of this by refusing to pass a request upstream until Authelia approves it.
 
 ## Two ways to protect an app
 
@@ -34,7 +34,7 @@ Apps fall into two groups, and the stack supports both.
 
 **ForwardAuth** is for apps that don't have real authentication of their own. Traefik sends each incoming request to Authelia first. If the session is valid, Authelia returns a `200` and the request goes through. Otherwise it returns a `302` to the login portal. Adding this to a service takes one middleware line in its Traefik config, and it's the default for everything.
 
-**OIDC** is for apps that support delegated login themselves. There are currently six: Headscale, Grafana, Home Assistant, Guacamole, Gatus, and OliveTin. OIDC takes more work per app, but it lets you map roles. Grafana reads your groups from the ID token, so LDAP group membership decides who is an admin and who is a viewer.
+**OIDC** is for apps that support delegated login themselves: Headscale, Grafana, Home Assistant, Guacamole, and OliveTin. (Gatus is a sixth OIDC client, but it only uses it to get a token for its health checks.) OIDC takes more work per app, but it lets you map roles. Grafana reads your groups from the ID token, so LDAP group membership decides who is an admin and who is a viewer. OliveTin does the same, so only admins see the buttons that run root-level commands.
 
 ```mermaid
 sequenceDiagram
@@ -56,9 +56,9 @@ sequenceDiagram
 
 ## Access control: default deny
 
-Authelia's access rules start with `default_policy: deny` and allow specific routes from there, with stricter requirements for more sensitive ones. Some routes need one factor, and admin routes need two. TOTP and WebAuthn/passkeys are both enabled, and password strength is checked with zxcvbn instead of arbitrary complexity rules.
+Authelia's access rules start with `default_policy: deny` and allow specific routes from there, with stricter requirements for more sensitive ones. From home or over the VPN one factor is enough, and from anywhere else it takes two. Requiring two factors for admin tools from every network is still on my list. TOTP and WebAuthn/passkeys are both enabled, and password strength is checked with zxcvbn instead of arbitrary complexity rules.
 
-The secrets this depends on (the LDAP bind password, OIDC HMAC key, issuer private key, and storage encryption key) never appear in config files on disk. They're injected when the container starts from an encrypted store, which is covered in [a separate post](encrypted-secrets.md).
+The secrets this depends on (the LDAP bind password, OIDC HMAC key, and storage encryption key) never appear in config files on disk. They're injected when the container starts from an encrypted store, which is covered in [a separate post](encrypted-secrets.md). The OIDC signing key is the same private key Authelia uses for TLS, read from its root-only certificates directory.
 
 ## Lessons learned
 
@@ -68,7 +68,7 @@ The secrets this depends on (the LDAP bind password, OIDC HMAC key, issuer priva
 
 **Authelia's startup errors often point at the wrong thing.** In my experience the actual problem is usually the LDAP or SMTP connection, regardless of what the error message says. Keeping a one-liner that runs Authelia locally with debug environment variables saved me hours of restarting containers.
 
-**Debugging LDAPS is miserable.** It was bad enough that TLS debugging across this stack got [its own post](tls-debugging.md). I should also admit that mutual TLS between LLDAP and Authelia is still disabled while I sort out a certificate CN issue. The connection is encrypted, but client certificates are still on the TODO list.
+**Debugging LDAPS is miserable.** It was bad enough that TLS debugging across this stack got [its own post](tls-debugging.md). I should also admit that mutual TLS between Traefik and Authelia is still disabled while I sort out a certificate issue. The connection is encrypted, but Authelia doesn't check client certificates yet.
 
 ## Results
 
