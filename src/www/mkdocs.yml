@@ -57,6 +57,9 @@ plugins:
       categories:
         - categories
       comments_path: "#__comments"
+      # Posts without an `image:` would fall back to their social card, whose size the
+      # plugin fetches from the live site, so the build would fail while the site is down.
+      use_material_social_cards: false
 
 hooks:
   - hooks/feed_images.py
