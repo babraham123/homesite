@@ -69,29 +69,29 @@ flowchart TB
 
 There are six VMs, and each one has a single job: `router` (pfSense, with all four physical NICs passed through over PCI), `secsvcs` (Authelia, LLDAP, and the metrics stack), `homesvcs` (Home Assistant, MQTT, and Zigbee), `websvcs` (user-facing apps), `devtop` (a Linux desktop), and `gaming` (Windows with GPU passthrough).
 
-I use VMs instead of running containers directly on the host to limit the damage when something goes wrong. Each VM has its own Traefik ingress and container subnet, so a bad deploy or a compromise stays inside one VM.
+I use VMs instead of running containers directly on the host to contain the blast radius if something goes wrong. Each VM has its own Traefik ingress and container subnet, so a bad deploy or a compromise stays inside one VM.
 
-The three VMs that run containers host about 30 services as Podman quadlets, which are systemd unit files that run containers. There's no Kubernetes and no Compose daemon. That decision gets [its own post](podman-quadlets.md).
+The three VMs that run containers host about 30 services as Podman quadlets, which are systemd unit files that run containers. There's no Kubernetes and no Compose daemon. I'll cover the 'why' behind that in [a dedicated post](podman-quadlets.md).
 
 ## How traffic gets in
 
 Public requests pass through three layers:
 
 1. **HAProxy on the VPS** reads the TLS SNI and routes the still-encrypted stream. It never terminates TLS. Rate limiting and geo-blocking also happen here.
-2. **A WireGuard mesh** (self-hosted Headscale) carries traffic from the VPS to the VMs at home. The home network never accepts inbound connections directly.
+2. **A WireGuard mesh** (self-hosted Headscale) carries traffic from the VPS to the VMs at home. The home router drops all direct inbound traffic.
 3. **Traefik on each VM** terminates TLS and requires SSO before a request reaches any service.
 
 Inside the house, split-horizon DNS lets Unbound resolve the same hostnames directly to the VMs, so internal traffic never goes through the VPS. The same URL works both at home and away.
 
 ## One command to deploy
 
-The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, plus a small node inventory (`src/nodes.yml`) that lists each machine's services and commands. The repetitive parts are generated from that list: DNS and SNI routing entries, uptime checks, OliveTin buttons, and the sudoers and dispatcher whitelists. Validation runs before anything ships: YAML lint, duplicate-IP checks, and a check that the inventory matches the install scripts and Traefik routes. Then `deploy_src.sh` pushes everything to every node.
+The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, plus a small node inventory (`src/nodes.yml`) that lists each machine's services and commands. That list generates all the boilerplate: DNS and SNI routing entries, uptime checks, OliveTin buttons, and the sudoers and dispatcher whitelists. A pre-deploy step catches the obvious stuff before anything ships: YAML lint, duplicate-IP checks, and a check that the inventory matches the install scripts and Traefik routes. Then `deploy_src.sh` pushes everything to every node.
 
-Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE, and values are decrypted when a container starts. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a whitelisted set of actions. Both have their own posts: [secrets](encrypted-secrets.md) and [the dispatcher](ssh-dispatcher.md).
+Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE, and secrets get decrypted on the fly when a container boots. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a strict allowlist of actions. Both have their own posts: [secrets](encrypted-secrets.md) and [the dispatcher](ssh-dispatcher.md).
 
 ## Known gaps
 
-This isn't a zero-trust network yet. The Headscale ACL policy is written but not enabled yet, so for now the mesh is permissive, and the real enforcement comes from VLAN firewall rules and the SSO layer. Wired VLAN segmentation is waiting on a managed switch. The VPS isn't monitored yet, and most alert rules still only watch the monitoring stack itself.
+I wouldn't call this a true zero-trust network yet. The Headscale ACL policy is written but not enabled yet, so for now the mesh is permissive, and the real enforcement comes from VLAN firewall rules and the SSO layer. Wired VLAN segmentation is waiting on a managed switch. The VPS isn't monitored yet, and most alert rules still only watch the monitoring stack itself.
 
 Writing down the gaps turned out to be as useful as documenting the architecture. About half of them became tracked issues with actual plans.
 

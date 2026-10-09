@@ -15,7 +15,7 @@ categories:
 
 Tailscale is one of the few products that feels like magic to me. Install it on two devices and they can reach each other from anywhere over WireGuard, through NATs and firewalls. But that depends on a coordination server that handles key exchange, node enrollment, and ACLs, and by default that server runs in Tailscale's cloud.
 
-Headscale is an open-source reimplementation of that server. I run it on my VPS, so all of the mesh's enrollment data, connection logs, and policy stay on hardware I control. This post covers what that gets me, what it costs, and where things currently stand.
+Headscale is an open-source reimplementation of that server. I run it on my VPS, so all of the mesh's enrollment data, connection logs, and policy stay on hardware I control. Here's a look at my setup, the tradeoffs, and what's left to do.
 
 <!-- more -->
 
@@ -40,7 +40,7 @@ This is what makes the [three-layer ingress design](private-cloud-at-home.md#how
 
 ## Don't skip the DERP relay
 
-Tailscale prefers direct peer-to-peer WireGuard connections, but some NAT setups, like carrier-grade NAT or strict corporate firewalls, can't be traversed. In those cases traffic falls back to a DERP relay. If you self-host coordination, it's worth self-hosting a relay too. Headscale has a built-in DERP server that you enable with a config block, and the relay map is sent to clients automatically. I run it alongside Tailscale's public relays, so peers get a relay close to home with fallbacks elsewhere. The relay only forwards encrypted packets, so even as the operator you can't read the traffic.
+Tailscale prefers direct peer-to-peer WireGuard connections, but you just can't punch through some NAT setups, like carrier-grade NAT or strict corporate firewalls. When that happens, traffic falls back to a DERP relay. If you self-host coordination, it's worth self-hosting a relay too. Headscale has a built-in DERP server that you enable with a config block, and the relay map is sent to clients automatically. I run it alongside Tailscale's public relays, so peers get a relay close to home with fallbacks elsewhere. The relay only forwards encrypted packets, so even as the operator you can't read the traffic.
 
 ## The bug that ate a weekend
 
@@ -54,17 +54,17 @@ ip route show table 52        # what routes actually got installed
 watch -n 0.5 tailscale status # direct vs. relayed, live
 ```
 
-The fix was to change the architecture. I stopped using a Mac as a subnet router and had a Linux VM on the same subnet advertise the routes instead. Check the Tailscale GitHub issues before assuming your Headscale config is wrong.
+I ended up sidestepping the bug entirely: I stopped using a Mac as a subnet router and had a Linux VM on the same subnet advertise the routes instead. Check the Tailscale GitHub issues before assuming your Headscale config is wrong.
 
 ## The ACLs are still off
 
-Headscale supports Tailscale-style ACLs, and I've written a group-based policy for admins, family, and guests, with a locked-down rule for the public endpoint and a `tests` block that checks the rules do what I expect. It isn't enabled yet, so for now the mesh is permissive, and network-level enforcement comes from VLAN firewall rules and the SSO layer.
+Headscale supports Tailscale-style ACLs, and I've written a group-based policy for admins, family, and guests, with a locked-down rule for the public endpoint and a `tests` block that checks the rules do what I expect. It isn't enabled yet, so for now the mesh is permissive, and I rely on VLAN firewall rules and my SSO layer to keep things locked down.
 
-For a long time I blamed pfSense for this. It runs on FreeBSD, where Tailscale can't disable SNAT on subnet routes, so I assumed ACLs couldn't see the real source IP. That turned out to be wrong: Tailscale checks ACLs in its packet filter against the sender's tailnet address, before any SNAT happens. What's left is testing the policy from real guest and family devices before switching it on. SNAT does still mean LAN hosts and pfSense logs see the router's address instead of the real client, and that's a separate tracked issue.
+For a long time I blamed pfSense for this. It runs on FreeBSD, where Tailscale can't disable SNAT on subnet routes, so I assumed ACLs couldn't see the real source IP. That turned out to be wrong: Tailscale checks ACLs in its packet filter against the sender's tailnet address, before any SNAT happens. I just need to test the policy with real guest and family devices before flipping the switch. SNAT does still mean LAN hosts and pfSense logs see the router's address instead of the real client, and that's a separate tracked issue.
 
 ## What you give up compared to managed Tailscale
 
-- **The admin web UI.** Everything is done with `headscale` CLI commands, which is fine for one person.
+- **The admin web UI.** You manage everything via `headscale` CLI commands, which is fine for a single-player setup.
 - **New features.** New Tailscale client features sometimes take a while to get Headscale support.
 - **Funnel.** HAProxy and a Tailscale client on the VPS do the same job, as described above.
 

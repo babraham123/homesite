@@ -28,7 +28,7 @@ This post covers Podman quadlets: what they are, what a real unit file looks lik
 
 For a homelab run by one person, the list of things you need from an orchestrator is short. It has to start containers at boot, restart them when they fail, handle dependency ordering, and collect logs.
 
-Kubernetes does all of that, but it also brings a control plane, CNI plugins, and a lot of YAML, and one person never really earns back that complexity. Docker Compose is lighter, but it needs its own daemon, and its systemd integration has always felt like an afterthought to me.
+Kubernetes does all of that, but it also brings a control plane, CNI plugins, and a lot of YAML, and it's hard to justify that overhead for a one-person setup. Docker Compose is lighter, but it needs its own daemon, and its systemd integration has always felt like an afterthought to me.
 
 systemd already handles lifecycle, restart policies, dependency ordering, and logging for every other process on the machine.
 
@@ -63,7 +63,7 @@ journalctl -eu authelia
 systemctl restart authelia
 ```
 
-The main appeal is that there are no new commands or concepts to learn.
+The best part is that you don't have to learn any new commands or abstractions.
 
 ## Static IPs instead of service discovery
 
@@ -83,11 +83,11 @@ flowchart LR
     t --> g
 ```
 
-This sounds primitive compared to DNS-based service discovery, and it is, but that's on purpose. Static IPs make everything downstream predictable. DNS records and uptime checks are generated from one inventory file at deploy time, the build checks that they match the Traefik routes, and it fails if two containers claim the same IP. It's simple, and I can grep for any address.
+This might sound primitive compared to DNS-based service discovery. It is—and that's the point. Static IPs make everything downstream predictable. I generate DNS records and uptime checks from a single inventory file at deploy time. The build verifies they match the Traefik routes and fails if two containers try to grab the same IP. It's simple, and I can grep for any address.
 
 ## Secrets
 
-The `Secret=` lines reference Podman secrets. Podman is configured with a shell driver, so each value is looked up at container startup from an AGE-encrypted file on the host instead of being stored by Podman. Some configs need secrets written into the file itself. For those, there's a second-pass template pattern (`*.j2.j2`) that renders the final config at container startup. That pipeline has [its own post](encrypted-secrets.md), and it's my favorite part of the setup.
+The `Secret=` lines reference Podman secrets. I use Podman's shell driver so it pulls values dynamically from an AGE-encrypted file on the host at startup, rather than storing them internally. Some apps insist on having secrets written directly into their config files. For those, there's a second-pass template pattern (`*.j2.j2`) that renders the final config at container startup. That pipeline has [its own post](encrypted-secrets.md), and it's my favorite part of the setup.
 
 ## Downsides
 

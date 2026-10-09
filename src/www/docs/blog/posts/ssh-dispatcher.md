@@ -40,7 +40,7 @@ Every node has two admin accounts:
 - **`manualadmin`** is for me. It's interactive and has full sudo, with a password.
 - **`autoadmin`** is for automation. Every connection it makes is forced into a single script.
 
-The forcing is done by sshd:
+sshd enforces this constraint:
 
 ```
 Match User autoadmin
@@ -76,11 +76,11 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
 esac
 ```
 
-Automation calls it like a normal SSH command, `ssh autoadmin@pve2 start_gaming_vm`. Anything that isn't on the list gets logged and rejected. Commands don't take parameters, so there's nothing from the request that ever gets interpolated into a shell.
+Automation calls it like a normal SSH command, `ssh autoadmin@pve2 start_gaming_vm`. Anything that isn't on the list gets logged and rejected. Commands don't take parameters, so no untrusted input ever gets interpolated into a shell.
 
 ## Sudoers generated from the same list
 
-The dispatcher only helps if `autoadmin`'s sudo access is just as narrow. If sudo allowed more than the dispatcher exposes, nothing would be gained, and if it allowed less, commands would fail. So I don't write either file by hand.
+The dispatcher only works if `autoadmin`'s sudo access is just as strict. Broad sudo ruins the security model, and missing rules break the commands. So I don't write either file by hand.
 
 Each node's services and commands are declared once in an inventory file, `src/nodes.yml`:
 
@@ -92,7 +92,7 @@ pve2:
     - {name: backup, run: [sudo /root/homelab-rendered/src/pve2/backup.sh]}
 ```
 
-At render time, a Jinja2 template turns that list into the dispatcher's `case` block, the node's sudoers file, and the OliveTin buttons. The sudoers file grants `autoadmin` passwordless sudo for exactly the command lines the dispatcher runs, and nothing else. The render also fails if the inventory disagrees with a node's install script, so the whitelist can't fall out of sync with the services that actually exist.
+At render time, a Jinja2 template turns that list into the dispatcher's `case` block, the node's sudoers file, and the OliveTin buttons. The sudoers file grants `autoadmin` passwordless sudo for exactly the command lines the dispatcher runs, and nothing else.
 
 ## One button, three hops
 
@@ -110,13 +110,11 @@ OliveTin adds its own layer on top. It reads group membership from my SSO login,
 
 ## Windows too
 
-The gaming VM runs OpenSSH, and the same `autoadmin` model works there with a PowerShell dispatcher that checks the request against a whitelist (`StartSunshine`, `StopSunshine`, and one setup command). One difference is that the Windows dispatcher doesn't run anything itself. Sunshine has to start in my logged-in desktop session, not in a background SSH session, so the dispatcher just drops a trigger file named `C:\SSH_Triggers\Homelab_<command>`. A small watcher running in the desktop session sees the file, runs the scheduled task with the same name, and deletes the trigger.
+The gaming VM runs OpenSSH, and the same `autoadmin` model works there with a PowerShell dispatcher that checks the request against a whitelist (`StartSunshine`, `StopSunshine`, and one setup command). The catch is that the Windows dispatcher doesn't run anything itself. Sunshine has to start in my logged-in desktop session, not in a background SSH session, so the dispatcher just drops a trigger file named `C:\SSH_Triggers\Homelab_<command>`. A small watcher running in the desktop session sees the file, runs the scheduled task with the same name, and deletes the trigger.
 
 ## Gotchas
 
-**File uploads pass through.** Modern `scp` (OpenSSH 9 and later) uses the SFTP protocol, so the dispatcher lets the `sftp-server` binary through. Certificate and key distribution needs it: new certs and SSH keys are copied into each node's `autoadmin` home directory, and a whitelisted root command moves them into place. This is the soft spot in the design. `autoadmin` can read and write files wherever `autoadmin` has permission, which is why that permission stops at its home directory and everything privileged goes through a whitelisted command.
-
-**Updating the dispatcher from inside the dispatcher.** The `install_dispatcher` command replaces `dispatcher.sh`, and it runs from inside `dispatcher.sh`. Bash reads a script a little at a time as it runs, so overwriting the file in place made bash resume at the old byte position in the new file and run whatever happened to be there. The fix is to copy the new version to `dispatcher.sh.new` and `mv` it over the old one. A rename gives the new file its own inode, and the running bash keeps reading the old one.
+**File uploads pass through.** Modern `scp` (OpenSSH 9 and later) uses the SFTP protocol, so the dispatcher lets the `sftp-server` binary through. I need this for distributing certificates and keys: new certs and SSH keys are copied into each node's `autoadmin` home directory, and a whitelisted root command moves them into place. This is the soft spot in the design. `autoadmin` can read and write files wherever `autoadmin` has permission, which is why that permission stops at its home directory and everything privileged goes through a whitelisted command.
 
 **Host keys.** Automation can't answer a "do you trust this host?" prompt. Every node gets an SSH host certificate signed by the lab's own SSH certificate authority, so clients trust any host signed by it without ever seeing that prompt.
 
