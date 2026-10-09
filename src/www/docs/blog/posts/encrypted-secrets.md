@@ -38,12 +38,10 @@ I still use Podman secrets, just with a different driver.
 
 There are two kinds of secrets files:
 
-- **Source files on pve1.** pve1 is the always-on Proxmox host that holds the trust roots for the whole lab (its certificate authorities and keys), so it also keeps one secrets file per VM at `/root/secrets/<host>.yaml`. These are SOPS files encrypted to pve1's AGE key. SOPS encrypts only the values and leaves the key names readable, so I can see which secrets a file holds without decrypting it.
-- **A deployed file on each VM.** Each VM has `/etc/opt/secrets/secrets.yaml.age`, encrypted with AGE to two recipients: pve1's key and the VM's own ed25519 SSH key. SOPS can't use SSH keys as recipients, so the update script decrypts the SOPS file and re-encrypts it with the `age` CLI. The VM's private key sits next to the file in a root-only directory.
+- **Source files on pve1.** pve1 is the always-on Proxmox host that holds the trust roots for the whole lab (its certificate authorities and keys), so it also keeps one SOPS file per VM, encrypted to pve1's AGE key. SOPS encrypts only the values, so I can see which secrets a file holds without decrypting it.
+- **A deployed file on each VM,** encrypted with AGE to two recipients: pve1's key and the VM's own SSH key. Only root on that VM can read the key that decrypts it.
 
-The one exception is the VPS (vpnsvcs), which doesn't run Podman yet. Its few secrets are root-only plaintext files for now.
-
-Git only has a `secrets_template.yaml` for each VM. It lists every secret name with an empty value, with a comment above each one showing the command I used to generate it. When I rebuild a VM, the template tells me which secrets need to exist.
+Git just holds a template for each VM with empty values, so I know which secrets need to exist during a rebuild.
 
 ```mermaid
 flowchart LR
@@ -80,7 +78,7 @@ store = 'true'
 delete = 'true'
 ```
 
-Podman only keeps a mapping from each secret's name to its ID. When I update a VM's secrets, the update script recreates each Podman secret with a placeholder value to keep those names current. When a container starts, Podman calls `get_secret_by_id.sh`, which decrypts the AGE file and prints the requested value. Quadlets use the normal syntax, like `Secret=authelia_storage_key,type=env,target=AUTHELIA_STORAGE_ENCRYPTION_KEY`, and the value stays encrypted on disk. Most services, including Authelia, get their secrets this way.
+Podman only keeps a mapping from each secret's name to its ID. When a container starts, Podman calls `get_secret_by_id.sh`, which decrypts the AGE file and prints the requested value. Quadlets use the normal syntax, like `Secret=authelia_storage_key,type=env,target=AUTHELIA_STORAGE_ENCRYPTION_KEY`, and the value stays encrypted on disk. Most services, including Authelia, get their secrets this way.
 
 **Path 2: the `*.j2.j2` double template.** Some apps only read secrets from their config file. Alertmanager and ntfy are two examples in my lab. Their configs are Jinja2 templates that get rendered twice:
 
@@ -95,11 +93,8 @@ On pve1, `secret_update.sh <host>` opens that VM's SOPS file in `$EDITOR`. After
 
 ## Tradeoffs
 
-- **pve1's AGE key is the most important key.** It decrypts the source file for every VM. If a VM's key is lost, I can generate a new one and run the update script again. pve1's key and the SOPS files go to my Proxmox Backup Server every week, but that backup is encrypted with its own key. If I lose both, I'd have to scrape the values from each VM or regenerate them from scratch.
-- **Git isn't a backup for secrets.** Rebuilding a VM takes the repo, `vars.yml`, the SOPS files, and pve1's AGE key. Git only has the repo. The rest goes into a weekly host backup of pve1, except the backup encryption key itself, which has to live offline.
+- **pve1's AGE key is the most important key, and git doesn't back it up.** It decrypts the source file for every VM, and rebuilding a VM takes it along with the SOPS files and `vars.yml`. These go to my Proxmox Backup Server weekly, but that backup is encrypted with its own offline key. If I lose both keys, I'd have to scrape the values from each VM or regenerate them from scratch.
 - **There's no audit log.** A secrets manager records who read which secret and when, and a file can't do that. That's fine for one person and a dealbreaker for a team.
 - **Rotation means editing, redistributing, and restarting,** not a live swap. At homelab scale that isn't a problem.
-
-The tradeoff is worth it: there's no extra service to run, and the lab doesn't depend on a central server to boot. Quadlets use Podman secrets with the standard syntax, and Podman never stores a plaintext copy.
 
 The scripts are in [the repo](https://github.com/babraham123/homelab). `src/podman/` has the lookup and render scripts and `containers.conf`, `src/pve1/secret_update.sh` handles distribution, and the design note explains the decision.

@@ -58,7 +58,7 @@ As for latency, playing on a wired Raspberry Pi at 1080p60 felt almost indisting
 
 ## Administering Windows like a Linux box
 
-Since the VM has no monitor, I manage it like every other node in the lab: over SSH. Windows runs OpenSSH fine, and the VM uses host certificates signed by the homelab's internal SSH CA, so clients trust it automatically. It also follows the same locked-down automation rules as the rest of the lab. A [PowerShell dispatcher](https://github.com/babraham123/homelab/blob/main/src/gaming/Dispatcher.ps1.j2) accepts only a whitelisted set of remote commands (mostly starting and stopping Sunshine), the same forced-command model the Linux nodes use. The "start gaming" button on my phone chains three of these: the router sends wake-on-LAN, pve2 starts the VM, and the VM starts Sunshine. None of the credentials involved can run arbitrary commands, and OliveTin only shows those buttons to family accounts.
+Since the VM has no monitor, I manage it like every other node in the lab: over SSH, with a [PowerShell dispatcher](https://github.com/babraham123/homelab/blob/main/src/gaming/Dispatcher.ps1.j2) that only accepts a short list of commands (mostly starting and stopping Sunshine). The "start gaming" button on my phone chains three of those commands across the router, pve2, and the VM, and none of the credentials involved can run arbitrary commands. [A separate post](ssh-dispatcher.md) covers how that works.
 
 ## Should you build one?
 

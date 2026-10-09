@@ -33,8 +33,6 @@ Zigbee2MQTT finds its network Zigbee coordinator (an SLZB-06) through mDNS (`_sl
 
 The services are on different subnets, so mDNS traffic has to cross a boundary, which made the firewall the obvious suspect. The pfSense rules for UDP/5353 looked correct, but rules that look right on paper don't prove anything, so I ran `tcpdump -i eth0 udp port 5353` on the destination. No packets were arriving. They weren't leaving the source either, and a firewall can't block packets that are never sent. So it wasn't the firewall.
 
-Lesson one: when debugging mDNS, just reach for tcpdump right away. Capturing at the source, the boundary, and the destination narrows the problem down in a few minutes.
-
 ## Hypothesis 2: the repeater (half right)
 
 The mdns_repeater service copies multicast traffic between the VM's network card and the container network. `systemctl status` showed it running with no errors. But its config binds to interfaces by name, and the network reconfiguration had changed a Linux interface name (`eth0` → `enp2s0`-style predictable naming). The repeater was silently listening on a ghost interface without throwing a single error. I updated the config and restarted it, and tcpdump confirmed packets were now crossing the boundary.
@@ -67,8 +65,7 @@ Running it from different networks shows exactly what's discoverable from each. 
 
 ## Lessons
 
-- **After any network change, check interface names first.** Linux renames interfaces for many reasons, and any config that binds by name will break without an error.
-- **Run tcpdump before forming theories.** Multicast has no error path, so packet captures are the only reliable source of information.
+- **Run tcpdump before forming theories.** Multicast has no error path, so packet captures are the only reliable source of information. Capture at the source, the boundary, and the destination.
 - **Don't run Avahi and an mDNS repeater on the same host.** Check for Avahi even if you never installed it yourself. That's exactly how it sneaks up on you.
 - **mDNS discovery across subnets is fragile by design.** For infrastructure services I've since moved to stable DNS names in Unbound, saving mDNS for the consumer devices that actually rely on it.
 

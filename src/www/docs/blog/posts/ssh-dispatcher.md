@@ -110,23 +110,20 @@ OliveTin adds its own layer on top. It reads group membership from my SSO login,
 
 ## Windows too
 
-The gaming VM runs OpenSSH, and the same `autoadmin` model works there with a PowerShell dispatcher that checks the request against a whitelist (`StartSunshine`, `StopSunshine`, and one setup command). The catch is that the Windows dispatcher doesn't run anything itself. Sunshine has to start in my logged-in desktop session, not in a background SSH session, so the dispatcher just drops a trigger file named `C:\SSH_Triggers\Homelab_<command>`. A small watcher running in the desktop session sees the file, runs the scheduled task with the same name, and deletes the trigger.
+The gaming VM runs OpenSSH, and the same `autoadmin` model works there with a PowerShell dispatcher that checks the request against a whitelist (`StartSunshine`, `StopSunshine`, and one setup command). The catch is that Sunshine needs my active desktop session, so the dispatcher hands commands off to a scheduled task instead of running them directly.
 
-## Gotchas
+## The one exception: file uploads
 
-**File uploads pass through.** Modern `scp` (OpenSSH 9 and later) uses the SFTP protocol, so the dispatcher lets the `sftp-server` binary through. I need this for distributing certificates and keys: new certs and SSH keys are copied into each node's `autoadmin` home directory, and a whitelisted root command moves them into place. This is the soft spot in the design. `autoadmin` can read and write files wherever `autoadmin` has permission, which is why that permission stops at its home directory and everything privileged goes through a whitelisted command.
-
-**Host keys.** Automation can't answer a "do you trust this host?" prompt. Every node gets an SSH host certificate signed by the lab's own SSH certificate authority, so clients trust any host signed by it without ever seeing that prompt.
+Modern `scp` (OpenSSH 9+) uses SFTP, so the dispatcher whitelists the `sftp-server` binary. I need this for distributing certificates and keys: new certs and SSH keys are copied into each node's `autoadmin` home directory, and a whitelisted root command moves them into place. This is the soft spot in the design. `autoadmin` can read and write files wherever `autoadmin` has permission, which is why that permission stops at its home directory and everything privileged goes through a whitelisted command.
 
 ## Tradeoffs
 
 - **Adding a remote action takes a deploy.** Every new command means a line in `nodes.yml` and a redeploy. That friction is deliberate.
 - **There are no parameters.** Anything that needs input becomes one command per variant, or a command that reads a file.
 - **It doesn't scale to a fleet.** This works well for nine nodes and one operator. A team managing hundreds of machines needs real config management.
-- **The narrow sudo grant is the whole security model.** The tempting shortcut is to give `autoadmin` broader sudo "just for now". Doing that would quietly undo everything above.
 
 ## What a stolen key gets you
 
-If someone steals the automation key, they can replay a fixed menu of actions that take no parameters: restart a service, start a VM, run a backup. That's annoying, but it's a much better worst case than root on every machine.
+If someone steals the automation key, they can replay a fixed menu of actions that take no parameters (restart a service, start a VM, run a backup) and read or write files in `autoadmin`'s home directory. That's annoying, but it's a much better worst case than root on every machine.
 
-The pieces are in [the repo](https://github.com/babraham123/homelab): [`src/nodes.yml`](https://github.com/babraham123/homelab/blob/main/src/nodes.yml) is the inventory, `src/nodes.jinja` generates the dispatcher and sudoers files, and [`src/debian/autoadmin_sshd.conf`](https://github.com/babraham123/homelab/blob/main/src/debian/autoadmin_sshd.conf) has the sshd config. The design notes in [`docs/adr/`](https://github.com/babraham123/homelab/tree/main/docs/adr) (0005 and 0006) explain the reasoning.
+The inventory, templates, and sshd config are in [the repo](https://github.com/babraham123/homelab), and [design notes 0005 and 0006](https://github.com/babraham123/homelab/tree/main/docs/adr) explain the reasoning.

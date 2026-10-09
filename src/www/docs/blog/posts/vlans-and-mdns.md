@@ -36,7 +36,7 @@ pfSense runs as a VM with the router hardware's four NICs passed through to it, 
 
 (Wired VLANs 20 and 21 are defined but waiting on a managed PoE switch. That's also why the camera is currently on the trusted network.)
 
-The firewall drops IoT-to-trusted traffic by default, with exceptions for the services IoT devices actually need (Home Assistant and MQTT). The guest network can reach the internet and nothing else. The AP's management interface is on the trusted VLAN.
+The firewall drops IoT-to-trusted traffic by default, with exceptions for the services IoT devices actually need (Home Assistant and MQTT). The guest network can reach the internet and nothing else.
 
 ## The problem: multicast stops at the router
 
@@ -69,9 +69,7 @@ flowchart TB
 
 ## Watch out for Avahi
 
-If a VM is running `avahi-daemon` (Debian installs it as a dependency of many packages), it will intercept mDNS queries before the repeater sees them. It fails silently, and discovery just stops working. Disable Avahi on any machine that runs `mdns_repeater`. This cost me an evening the first time, and later a full debugging session that turned into [its own post](mdns-debugging.md).
-
-To check that discovery is working, I keep a small Node.js probe script (`test/mdns.js`) that I run from a throwaway container on the same Podman network as Home Assistant. It sends a few mDNS queries and prints the responses, which is much faster than restarting Home Assistant and hoping for the best.
+If a VM is running `avahi-daemon` (Debian installs it as a dependency of many packages), it will answer mDNS queries before the repeater's traffic gets a chance. Disable it on any machine that runs `mdns_repeater`. Finding that out took a full debugging session, which turned into [its own post](mdns-debugging.md).
 
 ## Is it worth it?
 

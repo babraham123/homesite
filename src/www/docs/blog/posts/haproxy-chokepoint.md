@@ -52,11 +52,9 @@ Plain HTTP isn't encrypted, so it gets full request inspection. This is where mo
 
 - **Attack-path filtering.** Requests for `.env`, `.git`, `wp-admin`, `phpmyadmin`, and similar paths are silently dropped. No legitimate visitor has ever asked my server for `/.aws/credentials`.
 - **Sticky banning.** More than 150 requests in 10 seconds flags the source IP in a counter. Once an IP is flagged, all of its traffic is dropped until the table entry expires, even if it slows down. This catches bursts, and it also catches clients that try to throttle themselves to stay under the limit.
-- **Geo-blocking.** A systemd timer converts the MaxMind GeoIP database into per-country map files every week. Requests from countries on my blocklist are dropped with an O(log n) lookup. This filter also runs on the encrypted 443 frontend, since it only needs the source IP.
+- **Geo-blocking.** I drop requests from blocklisted countries using the MaxMind GeoIP database. This filter runs on the encrypted 443 frontend too, since it just needs the source IP.
 
 Most of what gets through is Let's Encrypt HTTP-01 challenges, which pass through to Traefik, and redirects to HTTPS.
-
-Throughout the config I use `silent-drop` instead of returning errors. An error page tells a scanner that something is there and shows how it responds. Dropping the connection tells it nothing.
 
 ## Hardening the box itself
 
