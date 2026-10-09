@@ -31,6 +31,21 @@
   border-radius: 0.2rem;
 }
 
+/* Phones get the copy after the title, so long titles keep the full width */
+.md-post__thumb--narrow {
+  display: none;
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-post__thumb--wide {
+    display: none;
+  }
+
+  .md-post__thumb--narrow {
+    display: block;
+  }
+}
+
 @media screen and (max-width: 30em) {
   .md-post__thumb {
     margin-left: 0.8rem;

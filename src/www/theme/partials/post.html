@@ -2,6 +2,8 @@
   Copied from mkdocs-material 9.7.7 (templates/partials/post.html). Only change:
   a square thumbnail beside the excerpt, derived from the post's `image` front
   matter (`../../img/blog/<slug>-card.webp` -> `img/blog/<slug>-thumb.webp`).
+  It's rendered beside the title, and again after it for phones so long titles
+  keep the full width; CSS shows one (hidden lazy images aren't fetched).
   Re-copy the upstream template when upgrading Material.
 -#}
 <article class="md-post md-post--excerpt">
@@ -58,11 +60,16 @@
   <div class="md-post__content md-typeset">
     {% if post.meta.image %}
       {% set thumb = post.meta.image | replace("../../", "") | replace("-card.", "-thumb.") %}
-      <a href="{{ post.url | url }}" class="md-post__thumb" tabindex="-1" aria-hidden="true">
-        <img src="{{ thumb | url }}" alt="" width="320" height="320" loading="lazy">
-      </a>
+      {% macro thumb_link(variant) %}
+        <a href="{{ post.url | url }}" class="md-post__thumb md-post__thumb--{{ variant }}" tabindex="-1" aria-hidden="true">
+          <img src="{{ thumb | url }}" alt="" width="320" height="320" loading="lazy">
+        </a>
+      {% endmacro %}
+      {{ thumb_link("wide") }}
+      {{ post.content | replace("</h2>", "</h2>" ~ thumb_link("narrow"), 1) }}
+    {% else %}
+      {{ post.content }}
     {% endif %}
-    {{ post.content }}
     {% if post.more %}
       <nav class="md-post__action">
         <a href="{{ post.url | url }}">
