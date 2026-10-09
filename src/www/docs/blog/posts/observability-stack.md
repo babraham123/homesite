@@ -54,20 +54,11 @@ flowchart LR
     vmdb & vl --> graf
 ```
 
-## Config from one place
-
-Each VM has a small templated scrape config, rendered from the same variable file as everything else in the lab. Uptime checks go further: each service's entry in one inventory file (`nodes.yml`) can name a Gatus check, so monitoring a new service takes one key, and the deploy fails if the inventory and the install scripts disagree. Retention settings for metrics, logs, and Home Assistant history are all in the same `vars.yml`.
-
-pfSense exports router metrics through Telegraf. I also wrote a small custom exporter that serves stock prices, since any data can be exposed in Prometheus format. It's completely unnecessary and currently disabled in the scrape config, but I'd still recommend writing one just for the practice.
-
 ## Alerts that reach a person
 
 Nobody watches dashboards all day, so alerts need to reach me. vmalert evaluates rules against VictoriaMetrics and forwards alerts to Alertmanager, which routes through a small bridge to **ntfy**. ntfy is a self-hosted push server with a phone app, so notifications arrive right away without email delays or a third-party service. Today the rules cover the monitoring stack itself, backups, and disk health. Host, service, and cert-expiry rules are next on the list.
 
-Two reliability tricks I'd recommend copying:
-
-- **A separate second path.** Gatus probes every service's URL on its own schedule and shows the results on a status page, so a broken metrics pipeline can't hide an outage. ([More on Gatus in the next post.](gatus-uptime.md))
-- **A cert-expiry email.** A standalone timer emails me well before any certificate expires, independent of everything else. Expired certs are one of the most common ways homelabs break without anyone noticing.
+Two checks sit outside this pipeline on purpose: [Gatus](gatus-uptime.md) probes every service on its own schedule, and a standalone timer emails me before any certificate expires. A broken metrics pipeline can't hide an outage from either.
 
 Grafana sits on top with both datasources, protected by [SSO](self-hosted-sso.md) with group-to-role mapping. I have about a dozen dashboards: per-VM and Proxmox overviews, auth events, router interfaces, and one for each piece of the monitoring stack.
 

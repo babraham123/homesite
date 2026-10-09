@@ -67,7 +67,7 @@ flowchart TB
     haproxy -- "WireGuard mesh" --> websvcs
 ```
 
-There are six VMs, and each one has a single job: `router` (pfSense, with all four physical NICs passed through over PCI), `secsvcs` (Authelia, LLDAP, and the metrics stack), `homesvcs` (Home Assistant, MQTT, and Zigbee), `websvcs` (user-facing apps), `devtop` (a Linux desktop), and `gaming` (Windows with GPU passthrough).
+There are six VMs, each with a single job. The diagram leaves out `devtop`, a Linux desktop that shares pve2's GPU with the gaming VM.
 
 I use VMs instead of running containers directly on the host to contain the blast radius if something goes wrong. Each VM has its own Traefik ingress and container subnet, so a bad deploy or a compromise stays inside one VM.
 
@@ -85,7 +85,7 @@ Inside the house, split-horizon DNS lets Unbound resolve the same hostnames dire
 
 ## One command to deploy
 
-The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, plus a small node inventory (`src/nodes.yml`) that lists each machine's services and commands. That list generates all the boilerplate: DNS and SNI routing entries, uptime checks, OliveTin buttons, and the sudoers and dispatcher whitelists. A pre-deploy step catches the obvious stuff before anything ships: YAML lint, duplicate-IP checks, and a check that the inventory matches the install scripts and Traefik routes. Then `deploy_src.sh` pushes everything to every node.
+The repo is built from Jinja2 templates. `render_src.sh` fills in variables from a single `vars.yml`, plus a small node inventory (`src/nodes.yml`) that lists each machine's services and commands. That list generates all the boilerplate: DNS and SNI routing entries, uptime checks, OliveTin buttons, and the sudoers and dispatcher whitelists. After a validation pass, `deploy_src.sh` pushes everything to every node.
 
 Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE, and secrets get decrypted on the fly when a container boots. There's no Ansible and there are no agents. Remote automation goes through an SSH forced-command dispatcher that can only run a strict allowlist of actions. Both have their own posts: [secrets](encrypted-secrets.md) and [the dispatcher](ssh-dispatcher.md).
 
@@ -94,7 +94,3 @@ Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE,
 I wouldn't call this a true zero-trust network yet. The Headscale ACL policy is written but not enabled yet, so for now the mesh is permissive, and the real enforcement comes from VLAN firewall rules and the SSO layer. Wired VLAN segmentation is waiting on a managed switch. The VPS isn't monitored yet, and most alert rules still only watch the monitoring stack itself.
 
 Writing down the gaps turned out to be as useful as documenting the architecture. About half of them became tracked issues with actual plans.
-
-## Coming up
-
-The rest of this series covers individual layers in detail: quadlets, SSO, secrets, the HAProxy edge, Headscale, VLANs and mDNS (in two posts, the second being a debugging story), observability, and streaming games from a headless VM.

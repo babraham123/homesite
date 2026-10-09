@@ -83,11 +83,11 @@ flowchart LR
     t --> g
 ```
 
-This might sound primitive compared to DNS-based service discovery. It is—and that's the point. Static IPs make everything downstream predictable. I generate DNS records and uptime checks from a single inventory file at deploy time. The build verifies they match the Traefik routes and fails if two containers try to grab the same IP. It's simple, and I can grep for any address.
+This might sound primitive compared to DNS-based service discovery. It is—and that's the point. Static IPs make everything downstream predictable, and I can grep for any address.
 
 ## Secrets
 
-The `Secret=` lines reference Podman secrets. I use Podman's shell driver so it pulls values dynamically from an AGE-encrypted file on the host at startup, rather than storing them internally. Some apps insist on having secrets written directly into their config files. For those, there's a second-pass template pattern (`*.j2.j2`) that renders the final config at container startup. That pipeline has [its own post](encrypted-secrets.md), and it's my favorite part of the setup.
+The `Secret=` lines reference Podman secrets, which are pulled from an AGE-encrypted file on the host at container startup. That pipeline has [its own post](encrypted-secrets.md), and it's my favorite part of the setup.
 
 ## Downsides
 

@@ -24,17 +24,13 @@ If your monitoring pipeline breaks quietly, nothing alerts you, and that looks e
 
 ## Why a second monitoring system
 
-The metrics pipeline has several moving parts: agents, remote writes, a time-series database, and rule evaluation. If one of those links breaks quietly, you just stop getting data.
-
-Gatus is a cheap way to cover that gap. It's a single container with a YAML config that polls endpoints on a schedule (HTTP status, response body, DNS, TCP, TLS expiry) and renders a simple status page. It piggybacks on the Postgres setup I already run, and I don't have to learn a new query language. It doesn't depend on any part of the metrics pipeline, so a broken scrape or a full time-series disk can't hide an outage from it.
+Gatus is a single container with a YAML config that polls endpoints on a schedule (HTTP status, response body, DNS, TCP, TLS expiry) and renders a simple status page. It piggybacks on the Postgres setup I already run, and I don't have to learn a new query language. It doesn't depend on any part of the metrics pipeline (agents, remote writes, the time-series database), so a broken scrape or a full time-series disk can't hide an outage from it.
 
 ## A private status page
 
 Public status pages make sense for products. For a homelab, broadcasting every service and its live health is free reconnaissance for anyone who stumbles across it. So the Gatus dashboard sits behind the same SSO as everything else, and Traefik won't route to it without a valid Authelia session.
 
 There's a catch: most of the services Gatus checks are behind SSO too, so a plain HTTP probe would just hit a login redirect. Gatus solves this by being an OIDC client itself. It gets its own token from Authelia and sends it with every probe, so its checks reach the real service.
-
-If the lab is down and I'm away from home, I check the page through the [mesh VPN](self-hosting-tailscale-headscale.md) like any other service.
 
 ## Config that stays in sync
 
@@ -60,7 +56,7 @@ internal-endpoint: &internal
     - "[RESPONSE_TIME] < 1000"
 ```
 
-This list also scopes the Authelia token. If the inventory and install scripts disagree, the deploy fails—so monitoring can't quietly drift from reality. If I rename a domain in `vars.yml`, the checks pick up the change.
+This list also scopes the Authelia token. If I rename a domain in `vars.yml`, the checks pick up the change.
 
 There's also a maintenance window on Saturday mornings, which covers the weekly backup run, so planned downtime doesn't show up as an outage.
 
@@ -69,8 +65,6 @@ There's also a maintenance window on Saturday mornings, which covers the weekly 
 Gatus doesn't send alerts in my setup yet. Hooking it up to ntfy—with thresholds to ignore blips and send clear recovery notices—is next on my list. Until then it's a dashboard I check, and alerting comes from the metrics stack.
 
 Certificate expiry is the other gap. Right now one standalone email timer watches it. Dropping a `[CERTIFICATE_EXPIRATION]` condition in here gives you an easy safety net. This matters because expired certs are the most common reason a homelab quietly dies.
-
-Gatus keeps its own history in Postgres, but also exposes results for the metrics stack to scrape. This lets each tool stick to what it does best.
 
 ## Where to start
 

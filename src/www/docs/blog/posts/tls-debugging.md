@@ -41,17 +41,10 @@ Each arrow is a separate trust relationship, and any of them can fail on its own
 
 ## The process
 
-**Layer 0: does the service itself serve TLS correctly?** Test from its own VM:
+Start with the service itself, from its own VM, and then read the certificate that's actually being served, not the one you think you deployed:
 
 ```bash
 curl -vvv --cacert internal-ca.pem https://10.10.0.5:9091/
-```
-
-**Layer 1: can the next hop verify it?** Traefik's logs mentioned certificate verification failures. That means either the CA isn't trusted or the certificate doesn't cover the name being connected to.
-
-**Look at the certificate that's actually being served,** not the one you think you deployed:
-
-```bash
 openssl s_client -connect 10.10.0.5:9091 -CAfile internal-ca.pem
 openssl x509 -in cert.pem -text -noout   # read the SAN list!
 ```
