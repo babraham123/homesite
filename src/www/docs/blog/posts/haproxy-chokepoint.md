@@ -16,7 +16,7 @@ categories:
 
 My homelab has exactly one machine with a public IP: the smallest Linode instance available, running HAProxy on ports 80 and 443. Every request from the internet, legitimate or not, passes through one config file before it can reach anything I care about.
 
-That file handles SNI routing, rate limiting, sticky banning, geo-blocking, and filtering of common attack paths. This post walks through each of those, and explains why the design assumes the VPS will eventually be compromised.
+That file handles SNI routing, rate limiting, sticky banning, geo-blocking, and filtering of common attack paths. Here's how those work, and why the design assumes the VPS will eventually get compromised.
 
 <!-- more -->
 
@@ -42,9 +42,9 @@ If someone gets root on the VPS, they get traffic metadata: SNI names and IPs. T
 
 ## Layer 4: slowing down scanners
 
-The 443 frontend tracks every source IP in a stick table. More than 30 concurrent connections, or more than 50 new connections in 3 seconds, triggers `silent-drop`, and HAProxy stops responding. It sends no RST and no error, so the client waits for a timeout. That costs me almost nothing and wastes the scanner's time.
+The 443 frontend tracks every source IP in a stick table. Hitting 30 concurrent connections, or 50 new connections in 3 seconds, triggers `silent-drop` and HAProxy just stops responding. It sends no RST and no error, so the client waits for a timeout. That costs me almost nothing and wastes the scanner's time.
 
-There's also a 5-second `inspect-delay` while waiting for the ClientHello. A side effect is that naive port scanners spend five seconds on every probe.
+I also added a 5-second `inspect-delay` while waiting for the ClientHello. A side effect is that naive port scanners spend five seconds on every probe.
 
 ## Layer 7: the HTTP frontend
 
@@ -60,12 +60,12 @@ Throughout the config I use `silent-drop` instead of returning errors. An error 
 
 ## Hardening the box itself
 
-The VPS has its own hardening: SSH on a nonstandard port with 22 blocked at the firewall, fail2ban, and only five open ports (SSH, 80, 443, STUN, and WireGuard). Headscale's admin API listens only on localhost.
+The VPS itself is locked down: SSH on a nonstandard port with 22 blocked at the firewall, fail2ban, and only five open ports (SSH, 80, 443, STUN, and WireGuard). Headscale's admin API listens only on localhost.
 
 ## Results
 
 Watching the stick tables live (`echo "show table http_all" | socat stdio /run/haproxy/admin.sock`) is pretty entertaining. There's a steady stream of scanners hitting the path filters and rate limits, and none of it reaches an application. No web framework or container spends CPU on it, because HAProxy discards it first.
 
-This is all filtering at the connection and path level, though. An attack on an actual application bug will look like a normal request, and defending against that is the job of the [SSO layer](self-hosted-sso.md) and the apps themselves. The edge has a narrower job, which is getting rid of the noise, and it does that well.
+That said, this is strictly connection and path-level filtering. An attack on an actual application bug will look like a normal request, and defending against that is the job of the [SSO layer](self-hosted-sso.md) and the apps themselves. The edge has a narrower job, which is getting rid of the noise, and it does that well.
 
-The config template is [`src/haproxy/haproxy.cfg.j2`](https://github.com/babraham123/homelab) in the repo, and [a design note](https://github.com/babraham123/homelab/blob/main/docs/adr/0002-haproxy-sni-passthrough.md) in the repo explains the reasoning.
+You can find the config template at [`src/haproxy/haproxy.cfg.j2`](https://github.com/babraham123/homelab), along with [a design note](https://github.com/babraham123/homelab/blob/main/docs/adr/0002-haproxy-sni-passthrough.md) explaining the reasoning.

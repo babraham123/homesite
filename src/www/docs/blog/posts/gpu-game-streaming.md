@@ -26,7 +26,7 @@ I built this mostly because I could, and it has more rough edges than anything e
 
 ## The idea
 
-The server (`pve2`, an i5-13500 tower) already existed for other workloads. Adding a GPU and a Windows VM turned it into a gaming PC that works wherever there's a screen. It's also powered off most of the time. When I want to play, I tap a button on my phone in OliveTin (a self-hosted web UI that turns shell commands into buttons), which sends wake-on-LAN through the homelab's automation pipeline. A couple of minutes later, Moonlight finds the VM.
+I already had the server (`pve2`, an i5-13500 tower) running other stuff. Adding a GPU and a Windows VM turned it into a gaming PC that works wherever there's a screen. It's also powered off most of the time. When I want to play, I tap a button on my phone in OliveTin (a self-hosted web UI that turns shell commands into buttons), which sends wake-on-LAN through the homelab's automation pipeline. A couple of minutes later, Moonlight finds the VM.
 
 ```mermaid
 flowchart LR
@@ -41,7 +41,7 @@ flowchart LR
 
 ## Passthrough is the fussy part
 
-GPU passthrough (VFIO) gives the VM exclusive, native access to the physical GPU. The main things I learned:
+GPU passthrough (VFIO) gives the VM exclusive, native access to the physical GPU. Here are the biggest gotchas:
 
 - **Check your IOMMU groups first.** An IOMMU group is the smallest set of PCI devices the hardware can isolate from each other, and a VM has to get the whole group. The GPU and its HDMI audio function usually share a group, so they need to be passed through together. If the audio device doesn't come along, you get video with no sound and a confusing afternoon.
 - **Set the VM's virtual display to `none`.** If a virtual display is still attached, Sunshine may encode that instead of the GPU output. You'll see a black stream and no error anywhere.
@@ -52,16 +52,14 @@ The host keeps the CPU's integrated graphics for its own console. The Nvidia car
 
 ## Sunshine, Moonlight, and the couch
 
-Sunshine is an open-source replacement for NVIDIA's discontinued GameStream. It runs on the VM and encodes with NVENC, which is hardware encoding, so streaming has very little impact on game performance. Moonlight clients pair with a PIN.
+Sunshine is an open-source replacement for NVIDIA's discontinued GameStream. It runs on the VM and uses NVENC for hardware-accelerated encoding, so the stream barely touches game performance. Moonlight clients pair with a PIN.
 
-Two client notes. First, install **ViGEmBus** on Windows before pairing controllers. It's the virtual gamepad driver that makes Moonlight's forwarded input show up as a real Xbox controller. Second, **Playnite** makes a good launcher for the couch: Steam, GOG, and emulators all in one full-screen UI you can navigate with a gamepad.
-
-As for latency, a wired Raspberry Pi was nearly indistinguishable from native at 1080p60 when I used one. The Apple TV on 5 GHz WiFi, which I use now, adds a consistent 10-20 ms, which is fine for everything except fast competitive shooters. Remote play over the VPN lands around 40-80 ms. That's great for slower games while traveling but not for anything demanding.
+As for latency, playing on a wired Raspberry Pi at 1080p60 felt almost indistinguishable from playing natively. My current setup, an Apple TV on 5 GHz WiFi, adds a steady 10-20 ms—fine for everything except fast competitive shooters. Remote play over the VPN lands around 40-80 ms. That's great for slower games while traveling but not for anything demanding.
 
 ## Administering Windows like a Linux box
 
-Since the VM has no monitor, I manage it like every other node in the lab: over SSH. Windows runs OpenSSH fine, and the VM uses host certificates signed by the homelab's internal SSH CA, so clients trust it automatically. It also follows the lab's restricted automation pattern. A [PowerShell dispatcher](https://github.com/babraham123/homelab/blob/main/src/gaming/Dispatcher.ps1.j2) accepts only a whitelisted set of remote commands (mostly starting and stopping Sunshine), the same forced-command model the Linux nodes use. The "start gaming" button on my phone chains three of these: the router sends wake-on-LAN, pve2 starts the VM, and the VM starts Sunshine. None of the credentials involved can run arbitrary commands, and OliveTin only shows those buttons to family accounts.
+Since the VM has no monitor, I manage it like every other node in the lab: over SSH. Windows runs OpenSSH fine, and the VM uses host certificates signed by the homelab's internal SSH CA, so clients trust it automatically. It also follows the same locked-down automation rules as the rest of the lab. A [PowerShell dispatcher](https://github.com/babraham123/homelab/blob/main/src/gaming/Dispatcher.ps1.j2) accepts only a whitelisted set of remote commands (mostly starting and stopping Sunshine), the same forced-command model the Linux nodes use. The "start gaming" button on my phone chains three of these: the router sends wake-on-LAN, pve2 starts the VM, and the VM starts Sunshine. None of the credentials involved can run arbitrary commands, and OliveTin only shows those buttons to family accounts.
 
 ## Should you build one?
 
-If you want maximum FPS for competitive gaming, no. Buy a console or a desktop. But if you like the idea of one server acting as a game console in the living room and a full Windows PC on your laptop three time zones away, while drawing zero watts most of the week, this setup has been reliable for me. Almost all of the pain was in getting passthrough working that first weekend.
+If you want maximum FPS for competitive gaming, no. Buy a console or a desktop. But if you like the idea of a single server acting as a living room console and a remote gaming rig while drawing zero watts most of the week, this setup has been rock solid. Almost all of the pain was in getting passthrough working that first weekend.

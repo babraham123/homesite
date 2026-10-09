@@ -14,7 +14,7 @@ categories:
 
 # The TLS Rabbit Hole: Debugging Auth Failures Across Three Proxies
 
-I enabled TLS on an internal service and broke SSO logins for half the homelab. The error showed up in Grafana, the logs pointed at Traefik, and the actual bug was a certificate two hops away. This post tells that story, but it's mostly about the debugging process I wish I'd used from the start, because with several layers of proxies, TLS failures tend to show up far from their cause.
+I enabled TLS on an internal service and broke SSO logins for half the homelab. The error showed up in Grafana, the logs pointed at Traefik, and the actual bug was a certificate two hops away. This post is about the debugging process I wish I'd used from the start. When you have multiple proxy layers, TLS failures usually show up miles away from the actual root cause.
 
 <!-- more -->
 
@@ -56,15 +56,15 @@ openssl s_client -connect 10.10.0.5:9091 -CAfile internal-ca.pem
 openssl x509 -in cert.pem -text -noout   # read the SAN list!
 ```
 
-That's where I found the problem. The cert's subject was the internal hostname, but Traefik was connecting to the container's IP, and the IP wasn't in the SAN list. Modern TLS ignores the CN field completely, so if the name you connect to isn't in the SANs, verification fails no matter what else is right. I reissued the cert with both the hostname and the IP in the SANs and redistributed it, which fixed the first bug.
+That's where I found the problem. The cert's subject was the internal hostname, but Traefik was connecting to the container's IP, and the IP wasn't in the SAN list. Modern TLS ignores the CN completely. If the name you're connecting to isn't in the SAN list, verification fails—period. I reissued the cert with both the hostname and the IP in the SANs and redistributed it, which fixed the first bug.
 
 ## The second bug
 
-Logins still failed, but with a different error, which at least meant progress. Authelia was now logging `redirect_uri did not match any registered URIs`, because Grafana's OIDC registration still had the callback URL from before the TLS change. The browser showed the same symptom as the certificate problem, but the cause was completely unrelated. TLS errors and OAuth misconfigurations look the same from the outside, and only the logs tell them apart.
+Logins still failed, but with a different error, which at least meant progress. Authelia was now logging `redirect_uri did not match any registered URIs`, because Grafana's OIDC registration still had the callback URL from before the TLS change. The browser showed the exact same symptom, but the root cause was completely unrelated. TLS errors and OAuth misconfigurations look the same from the outside, and only the logs tell them apart.
 
-There was one more problem after that. Services on the same VM as Authelia couldn't fetch its OIDC discovery document. Their requests to `auth.<domain>` loop back through Traefik, so they needed to trust Traefik's certificate chain, but the internal CA had only been distributed to containers with explicit cert mounts. This applies more broadly: **every client needs to trust the CA, including services you didn't think of as clients.**
+That wasn't the last issue, though. Services on the same VM as Authelia couldn't fetch its OIDC discovery document. Their requests to `auth.<domain>` loop back through Traefik, so they needed to trust Traefik's certificate chain, but the internal CA had only been distributed to containers with explicit cert mounts. This applies more broadly: **every client needs to trust the CA, including services you didn't think of as clients.**
 
-## The process, summarized
+## TL;DR: The debugging playbook
 
 1. Test each hop separately, from the inside out, using `curl` or `openssl s_client` against each layer directly.
 2. At each hop, check two things: whether the CA is trusted, and whether the name you're connecting to is in the SANs.
@@ -72,6 +72,6 @@ There was one more problem after that. Services on the same VM as Authelia could
 4. Temporarily set Traefik and Authelia logging to DEBUG. The default log levels hide the one line you need.
 5. If curl's errors aren't specific enough, run `tcpdump` on the container network and open the capture in Wireshark. It shows exactly which handshake message fails.
 
-## Still unfinished
+## What's left
 
-My original goal was mutual TLS on every internal hop, with both server and client certificates. Traefik already presents a client certificate to Authelia, but Authelia's check for it is still commented out with a `TODO` until I do another round of certificate fixes, so that hop is encrypted but doesn't verify client certs. I still think internal TLS is worth doing in a homelab. Each certificate is a small agreement about names and trust, though, and when one side gets it wrong you end up debugging. With this process it takes me minutes instead of whole evenings.
+My original goal was mutual TLS on every internal hop, with both server and client certificates. Traefik already presents a client certificate to Authelia, but Authelia's check for it is still commented out with a `TODO` until I get around to fixing the remaining certs, so that hop is encrypted but doesn't verify client certs. I still think internal TLS is worth doing in a homelab. Certificates are basically strict contracts about names and trust. If one side gets it wrong, you're stuck debugging. With this process it takes me minutes instead of whole evenings.

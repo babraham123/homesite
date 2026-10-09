@@ -15,7 +15,7 @@ categories:
 
 Most observability tutorials assume you have a Kubernetes cluster, a habit of installing Helm charts, and a platform team. My requirements were simpler. I wanted metrics from every VM and service, centralized searchable logs, and a push notification on my phone when something breaks, all running as plain containers that one person can operate.
 
-The stack is VictoriaMetrics, VictoriaLogs, Fluent Bit, Grafana, and an alert pipeline that ends at ntfy.
+The stack consists of VictoriaMetrics, VictoriaLogs, Fluent Bit, and Grafana, with an alert pipeline ending at ntfy.
 
 <!-- more -->
 
@@ -28,7 +28,7 @@ The stack is VictoriaMetrics, VictoriaLogs, Fluent Bit, Grafana, and an alert pi
 
 Prometheus is the default choice, but VictoriaMetrics works better for this use case. It's a drop-in replacement that uses noticeably less memory and compresses storage better, and a single binary handles both storage and queries. It speaks the same PromQL and uses the same Grafana datasource, so nothing downstream needs to change.
 
-Scraping works the opposite way from the usual setup. Instead of one central Prometheus reaching into every VM, a lightweight `vmagent` on each service VM scrapes its local targets and remote-writes to the central store. (The central VM just scrapes its own neighbors directly.) Each VM only needs one outbound connection, and the agents buffer data while the central store restarts, so I can restart VictoriaMetrics without losing data. Logs work the same way: Fluent Bit on each VM tails the systemd journal and forwards it to VictoriaLogs. Every service runs as a systemd unit ([quadlets](podman-quadlets.md)), so journald already has all the logs in one place.
+Scraping works the opposite way from the usual setup. Instead of one central Prometheus reaching into every VM, a lightweight `vmagent` on each service VM scrapes its local targets and remote-writes to the central store. (The central VM just scrapes its local services directly.) Each VM only needs one outbound connection, and the agents buffer data while the central store restarts, so I can restart VictoriaMetrics without losing data. Logs work the same way: Fluent Bit on each VM tails the systemd journal and forwards it to VictoriaLogs. Every service runs as a systemd unit ([quadlets](podman-quadlets.md)), so journald already has all the logs in one place.
 
 ```mermaid
 flowchart LR
@@ -58,13 +58,13 @@ flowchart LR
 
 Each VM has a small templated scrape config, rendered from the same variable file as everything else in the lab. Uptime checks go further: each service's entry in one inventory file (`nodes.yml`) can name a Gatus check, so monitoring a new service takes one key, and the deploy fails if the inventory and the install scripts disagree. Retention settings for metrics, logs, and Home Assistant history are all in the same `vars.yml`.
 
-pfSense exports router metrics through Telegraf. I also wrote a small custom exporter that serves stock prices, since any data can be exposed in Prometheus format. It's completely unnecessary, it's currently switched off in the scrape config, and I'd still recommend writing one for the practice.
+pfSense exports router metrics through Telegraf. I also wrote a small custom exporter that serves stock prices, since any data can be exposed in Prometheus format. It's completely unnecessary and currently disabled in the scrape config, but I'd still recommend writing one just for the practice.
 
 ## Alerts that reach a person
 
-Nobody watches dashboards all day, so alerts need to reach me. vmalert evaluates rules against VictoriaMetrics and fires to Alertmanager, which routes through a small bridge to **ntfy**. ntfy is a self-hosted push server with a phone app, so notifications arrive right away without email delays or a third-party service. Today the rules cover the monitoring stack itself, backups, and disk health. Host, service, and cert-expiry rules are next on the list.
+Nobody watches dashboards all day, so alerts need to reach me. vmalert evaluates rules against VictoriaMetrics and forwards alerts to Alertmanager, which routes through a small bridge to **ntfy**. ntfy is a self-hosted push server with a phone app, so notifications arrive right away without email delays or a third-party service. Today the rules cover the monitoring stack itself, backups, and disk health. Host, service, and cert-expiry rules are next on the list.
 
-Two reliability details I'd recommend copying:
+Two reliability tricks I'd recommend copying:
 
 - **A separate second path.** Gatus probes every service's URL on its own schedule and shows the results on a status page, so a broken metrics pipeline can't hide an outage. ([More on Gatus in the next post.](gatus-uptime.md))
 - **A cert-expiry email.** A standalone timer emails me well before any certificate expires, independent of everything else. Expired certs are one of the most common ways homelabs break without anyone noticing.
@@ -73,6 +73,6 @@ Grafana sits on top with both datasources, protected by [SSO](self-hosted-sso.md
 
 ## What I left out
 
-There's no distributed tracing. At this scale I already know which services talk to each other because I connected them. There's no anomaly detection either, just thresholds. VictoriaLogs' query UI is functional but not very polished, although it has been getting better. There are also no HTTP access logs or proxy metrics yet, and the VPS that runs my public edge isn't monitored. Both are next.
+There's no distributed tracing. At this scale I already know which services talk to each other because I connected them. There's no anomaly detection either, just thresholds. VictoriaLogs' query UI is functional but unpolished, though it's improving. There are also no HTTP access logs or proxy metrics yet, and the VPS that runs my public edge isn't monitored. Those are next on the list.
 
 The whole thing is eight small containers on one VM, managed with `systemctl`, using very little RAM. You don't need a platform team for good observability. A solid pipeline and alerts on your phone go a long way.

@@ -32,7 +32,7 @@ Mine is built from LLDAP, Authelia, and Traefik. It's all self-hosted, with no "
 
 Apps fall into two groups, and the stack supports both.
 
-**ForwardAuth** is for apps that don't have real authentication of their own. Traefik sends each incoming request to Authelia first. If the session is valid, Authelia returns a `200` and the request goes through. Otherwise it returns a `302` to the login portal. Adding this to a service takes one middleware line in its Traefik config, and it's the default for everything.
+**ForwardAuth** is for apps that don't have real authentication of their own. Traefik sends each incoming request to Authelia first. If the session is valid, Authelia returns a `200` and the request goes through. Otherwise it returns a `302` to the login portal. Adding this to a service takes just one line of Traefik middleware, so I use it as the default for everything.
 
 **OIDC** is for apps that support delegated login themselves: Headscale, Grafana, Home Assistant, Guacamole, and OliveTin. (Gatus is a sixth OIDC client, but it only uses it to get a token for its health checks.) OIDC takes more work per app, but it lets you map roles. Grafana reads your groups from the ID token, so LDAP group membership decides who is an admin and who is a viewer. OliveTin does the same, so only admins see the buttons that run root-level commands.
 
@@ -56,9 +56,9 @@ sequenceDiagram
 
 ## Access control: default deny
 
-Authelia's access rules start with `default_policy: deny` and allow specific routes from there, with stricter requirements for more sensitive ones. From home or over the VPN one factor is enough, and from anywhere else it takes two. Requiring two factors for admin tools from every network is still on my list. TOTP and WebAuthn/passkeys are both enabled, and password strength is checked with zxcvbn instead of arbitrary complexity rules.
+Authelia's access rules start with `default_policy: deny` and allow specific routes from there, with stricter requirements for more sensitive ones. From home or over the VPN one factor is enough, and from anywhere else it takes two. I still need to lock down admin tools with 2FA across all networks. TOTP and WebAuthn/passkeys are both enabled, and password strength is checked with zxcvbn instead of arbitrary complexity rules.
 
-The secrets this depends on (the LDAP bind password, OIDC HMAC key, and storage encryption key) never appear in config files on disk. They're injected when the container starts from an encrypted store, which is covered in [a separate post](encrypted-secrets.md). The OIDC signing key is the same private key Authelia uses for TLS, read from its root-only certificates directory.
+The secrets driving this (the LDAP bind password, OIDC HMAC key, and storage encryption key) never touch the disk in plain text. They're injected from an encrypted store at container startup (which I cover in [a separate post](encrypted-secrets.md)). The OIDC signing key is the same private key Authelia uses for TLS, read from its root-only certificates directory.
 
 ## Lessons learned
 
@@ -66,12 +66,12 @@ The secrets this depends on (the LDAP bind password, OIDC HMAC key, and storage 
 
 **Most OIDC failures come from `redirect_uri` mismatches.** The URI registered in Authelia has to match what the app sends exactly, including scheme, host, and path. After any TLS or domain change, check this before looking at certificates.
 
-**Authelia's startup errors often point at the wrong thing.** In my experience the actual problem is usually the LDAP or SMTP connection, regardless of what the error message says. Keeping a one-liner that runs Authelia locally with debug environment variables saved me hours of restarting containers.
+**Authelia's startup errors are often a red herring.** In my experience the actual problem is usually the LDAP or SMTP connection, regardless of what the error message says. Keeping a one-liner that runs Authelia locally with debug environment variables saved me hours of restarting containers.
 
 **Debugging LDAPS is miserable.** It was bad enough that TLS debugging across this stack got [its own post](tls-debugging.md). I should also admit that mutual TLS between Traefik and Authelia is still disabled while I sort out a certificate issue. The connection is encrypted, but Authelia doesn't check client certificates yet.
 
 ## Results
 
-Setting this up was worth it. Adding a new service now means adding a Traefik route and the auth middleware, and it's protected by the same login and 2FA as everything else. Family members each get one account with the groups they need. None of my identity data, sessions, or login history leaves hardware I own.
+The upfront effort was entirely worth it. Adding a new service now means adding a Traefik route and the auth middleware, and it's protected by the same login and 2FA as everything else. Family members each get one account with the groups they need. Best of all, none of my identity data, sessions, or login history ever leaves my hardware.
 
 The configs are in [the repo](https://github.com/babraham123/homelab) under `src/authelia/` and `src/lldap/`.

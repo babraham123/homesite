@@ -33,19 +33,19 @@ Zigbee2MQTT finds its network Zigbee coordinator (an SLZB-06) through mDNS (`_sl
 
 The services are on different subnets, so mDNS traffic has to cross a boundary, which made the firewall the obvious suspect. The pfSense rules for UDP/5353 looked correct, but rules that look right on paper don't prove anything, so I ran `tcpdump -i eth0 udp port 5353` on the destination. No packets were arriving. They weren't leaving the source either, and a firewall can't block packets that are never sent. So it wasn't the firewall.
 
-That was the first real lesson: with mDNS, start with tcpdump right away. Capturing at the source, the boundary, and the destination narrows the problem down in a few minutes.
+Lesson one: when debugging mDNS, just reach for tcpdump right away. Capturing at the source, the boundary, and the destination narrows the problem down in a few minutes.
 
 ## Hypothesis 2: the repeater (half right)
 
-The mdns_repeater service copies multicast traffic between the VM's network card and the container network. `systemctl status` showed it running with no errors. But its config binds to interfaces by name, and the network reconfiguration had changed a Linux interface name (`eth0` → `enp2s0`-style predictable naming). The repeater was listening on an interface that no longer existed and not reporting any problem. I updated the config and restarted it, and tcpdump confirmed packets were now crossing the boundary.
+The mdns_repeater service copies multicast traffic between the VM's network card and the container network. `systemctl status` showed it running with no errors. But its config binds to interfaces by name, and the network reconfiguration had changed a Linux interface name (`eth0` → `enp2s0`-style predictable naming). The repeater was silently listening on a ghost interface without throwing a single error. I updated the config and restarted it, and tcpdump confirmed packets were now crossing the boundary.
 
 Discovery still failed.
 
 ## Hypothesis 3: something was answering first
 
-If packets are arriving but the application still can't see the service, something between the network and the app is interfering. `ps aux` showed **avahi-daemon** running. I had never installed it. It had been pulled in as a dependency of some other package and started by default, which Debian does.
+If packets are arriving but the app still can't see the service, something else in the stack is eating them. `ps aux` showed **avahi-daemon** running. I had never installed it. Debian had pulled it in as a dependency for some other package and enabled it by default.
 
-Avahi is a full mDNS responder. It answers queries itself, using its own records, and those records knew nothing about services on other subnets. It was answering queries locally with "no such service" before the repeated responses from the other VLAN could matter. So there were two silent failures: the interface rename broke the transport, and Avahi hid the fact that the transport was fixed.
+Avahi is a full mDNS responder. It answers queries itself, using its own records, and those records knew nothing about services on other subnets. It was immediately failing local queries with "no such service" before the real responses from the other VLAN even had a chance. So there were two silent failures: the interface rename broke the transport, and Avahi hid the fact that the transport was fixed.
 
 ```bash
 systemctl disable --now avahi-daemon
@@ -69,7 +69,7 @@ Running it from different networks shows exactly what's discoverable from each. 
 
 - **After any network change, check interface names first.** Linux renames interfaces for many reasons, and any config that binds by name will break without an error.
 - **Run tcpdump before forming theories.** Multicast has no error path, so packet captures are the only reliable source of information.
-- **Don't run Avahi and an mDNS repeater on the same host.** Check for Avahi even if you never installed it yourself. That's exactly the situation where it catches you.
-- **mDNS discovery across subnets is fragile by design.** For infrastructure services I've since moved to stable DNS names in Unbound, and mDNS is left for consumer devices that actually need it.
+- **Don't run Avahi and an mDNS repeater on the same host.** Check for Avahi even if you never installed it yourself. That's exactly how it sneaks up on you.
+- **mDNS discovery across subnets is fragile by design.** For infrastructure services I've since moved to stable DNS names in Unbound, saving mDNS for the consumer devices that actually rely on it.
 
 The whole thing took one evening. With the probe script and this process, it would take about ten minutes now.
