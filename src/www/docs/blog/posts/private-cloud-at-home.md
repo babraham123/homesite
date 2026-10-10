@@ -36,7 +36,7 @@ Every homelab is shaped by its constraints. These are mine:
 
 **pve1** is a fanless mini PC from AliExpress with a Celeron N5105, 32 GB of RAM, and four 2.5 GbE Intel NICs. It runs 24/7 and hosts the router VM, identity, monitoring, and home automation. It also holds the trust roots (certificate authorities and secrets keys), so it's the most locked-down machine in the system.
 
-**pve2** is a custom tower with an i5-13500, an RTX 3060 Ti for the Windows gaming VM, a Tesla P4 for the voice pipeline, and a Coral TPU for camera object detection. It idles around 30 W, but it's usually turned off. An OliveTin button wakes it up when I want to play games or need the GPU.
+**pve2** is a custom tower with an i5-13500 and an RTX 3060 Ti for the Windows gaming VM. It idles around 30 W, but it's usually turned off. An OliveTin button wakes it up when I want to play games or need the GPU.
 
 **vpnsvcs** is the smallest Linode instance available, and it's the only machine with a public IP.
 
@@ -92,5 +92,3 @@ Secrets stay out of git. Each host has its own file encrypted with SOPS and AGE,
 ## Known gaps
 
 I wouldn't call this a true zero-trust network yet. The Headscale ACL policy is written but not enabled yet, so for now the mesh is permissive, and the real enforcement comes from VLAN firewall rules and the SSO layer. Wired VLAN segmentation is waiting on a managed switch. The VPS isn't monitored yet, and most alert rules still only watch the monitoring stack itself.
-
-Writing down the gaps turned out to be as useful as documenting the architecture. About half of them became tracked issues with actual plans.

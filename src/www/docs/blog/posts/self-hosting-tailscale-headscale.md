@@ -44,14 +44,11 @@ Tailscale prefers direct peer-to-peer WireGuard connections, but you just can't 
 
 ## The bug that ate a weekend
 
-When mesh routing misbehaves, suspect the client before your own config. I lost hours to a macOS Tailscale bug where Headscale accepted subnet routes advertised by a Mac but didn't re-propagate them after reconnects. These are the commands I used to track it down:
+When mesh routing misbehaves, suspect the client before your own config. I lost hours to a macOS Tailscale bug where Headscale accepted subnet routes advertised by a Mac but didn't re-propagate them after reconnects. These two commands tracked it down:
 
 ```bash
-headscale nodes list          # enrollment + last-seen
 tailscale ping <node>         # coordination-layer reachability
-tailscale ping --tsmp <node>  # protocol-level connectivity
 ip route show table 52        # what routes actually got installed
-watch -n 0.5 tailscale status # direct vs. relayed, live
 ```
 
 I ended up sidestepping the bug entirely: I stopped using a Mac as a subnet router and had a Linux VM on the same subnet advertise the routes instead. Check the Tailscale GitHub issues before assuming your Headscale config is wrong.

@@ -30,8 +30,6 @@ Gatus is a single container with a YAML config that polls endpoints on a schedul
 
 Public status pages make sense for products. For a homelab, broadcasting every service and its live health is free reconnaissance for anyone who stumbles across it. So the Gatus dashboard sits behind the same SSO as everything else, and Traefik won't route to it without a valid Authelia session.
 
-There's a catch: most of the services Gatus checks are behind SSO too, so a plain HTTP probe would just hit a login redirect. Gatus solves this by being an OIDC client itself. It gets its own token from Authelia and sends it with every probe, so its checks reach the real service.
-
 ## Config that stays in sync
 
 Endpoints aren't written into the Gatus config at all. Every service in my homelab has a line in one inventory file, `nodes.yml`, and giving it an `uptime` name generates the check:

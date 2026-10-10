@@ -53,13 +53,7 @@ After that, the lights worked again.
 
 ## A 30-line probe script
 
-Debugging this by restarting Zigbee2MQTT over and over was painful. Each cycle was slow and the logs were noisy. To avoid that in the future I wrote a small Node.js probe using the `multicast-dns` and `bonjour-service` packages. It sends a couple of queries for the coordinator and prints every response. I run it from a throwaway container on the same Podman network as the app, so it sees exactly what the app sees:
-
-```bash
-podman run --rm -it --network=systemd-net docker.io/library/node:lts-trixie-slim bash
-npm install -g multicast-dns bonjour-service
-NODE_PATH=$(npm root -g) node   # then paste in mdns.js
-```
+Debugging this by restarting Zigbee2MQTT over and over was painful. Each cycle was slow and the logs were noisy. To avoid that in the future I wrote a small Node.js probe using the `multicast-dns` and `bonjour-service` packages. It sends a couple of queries for the coordinator and prints every response. I run it from a throwaway container on the same Podman network as the app, so it sees exactly what the app sees.
 
 Running it from different networks shows exactly what's discoverable from each. I can test the repeater, the firewall, and the advertiser separately without involving production services. It lives in the repo's `test/` directory and has saved me time on several problems since.
 
