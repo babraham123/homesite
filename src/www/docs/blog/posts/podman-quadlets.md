@@ -63,8 +63,6 @@ journalctl -eu authelia
 systemctl restart authelia
 ```
 
-The best part is that you don't have to learn any new commands or abstractions.
-
 ## Static IPs instead of service discovery
 
 Besides `.container` files, there are also `.network` and `.volume` quadlets. Each VM defines one bridge network, and every container gets a **static IP** on it:

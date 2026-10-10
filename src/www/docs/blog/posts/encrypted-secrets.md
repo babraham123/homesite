@@ -30,7 +30,7 @@ A dedicated secrets manager is the usual way to handle this, and for a team it's
 
 ## Why not Podman's default secrets?
 
-Podman has built-in secrets, and quadlets can reference them with a `Secret=` line. The problem is the default `file` driver. `podman secret create` stores the value unencrypted in a JSON file under Podman's storage directory. Only root can read that file, but anyone with a copy of the VM's disk or one of its backups can read every secret. It also means manually updating the copied values on every VM.
+Podman has built-in secrets, and quadlets can reference them with a `Secret=` line. The problem is the default `file` driver. `podman secret create` stores the value unencrypted in a JSON file under Podman's storage directory. Only root can read that file, but anyone with a copy of the VM's disk or one of its backups can read every secret.
 
 I still use Podman secrets, just with a different driver.
 
@@ -87,14 +87,10 @@ Podman only keeps a mapping from each secret's name to its ID. When a container 
 
 This leaves plaintext on disk, so it's a last resort for apps that refuse to read secrets any other way.
 
-## Updating a secret
-
-On pve1, `secret_update.sh <host>` opens that VM's SOPS file in `$EDITOR`. After I save, the script re-encrypts the file for the VM, copies it over SSH, moves it into place, and recreates the Podman placeholder secrets. Then I restart the services that use the changed values.
-
 ## Tradeoffs
 
 - **pve1's AGE key is the most important key, and git doesn't back it up.** It decrypts the source file for every VM, and rebuilding a VM takes it along with the SOPS files and `vars.yml`. These go to my Proxmox Backup Server weekly, but that backup is encrypted with its own offline key. If I lose both keys, I'd have to scrape the values from each VM or regenerate them from scratch.
 - **There's no audit log.** A secrets manager records who read which secret and when, and a file can't do that. That's fine for one person and a dealbreaker for a team.
-- **Rotation means editing, redistributing, and restarting,** not a live swap. At homelab scale that isn't a problem.
+- **Rotation means editing, redistributing, and restarting,** not a live swap. On pve1, `secret_update.sh <host>` opens a VM's SOPS file in `$EDITOR` and ships the re-encrypted file when I save, and then I restart whatever uses the changed values. At homelab scale that isn't a problem.
 
 The scripts are in [the repo](https://github.com/babraham123/homelab). `src/podman/` has the lookup and render scripts and `containers.conf`, `src/pve1/secret_update.sh` handles distribution, and the design note explains the decision.

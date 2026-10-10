@@ -106,8 +106,6 @@ ssh autoadmin@router start_pve2 \
 
 The router sends a wake-on-LAN packet to pve2, pve2 starts the Windows VM, and the VM starts Sunshine, the game-streaming server. Each hop is a separate whitelist on a separate machine. The router can wake pve2, but it can't start or stop VMs, and pve2 can't do anything inside Windows.
 
-OliveTin adds its own layer on top. It reads group membership from my SSO login, denies everything by default, gives admins every button, and only shows the gaming buttons to everyone else.
-
 ## Windows too
 
 The gaming VM runs OpenSSH, and the same `autoadmin` model works there with a PowerShell dispatcher that checks the request against a whitelist (`StartSunshine`, `StopSunshine`, and one setup command). The catch is that Sunshine needs my active desktop session, so the dispatcher hands commands off to a scheduled task instead of running them directly.
@@ -119,7 +117,6 @@ Modern `scp` (OpenSSH 9+) uses SFTP, so the dispatcher whitelists the `sftp-serv
 ## Tradeoffs
 
 - **Adding a remote action takes a deploy.** Every new command means a line in `nodes.yml` and a redeploy. That friction is deliberate.
-- **There are no parameters.** Anything that needs input becomes one command per variant, or a command that reads a file.
 - **It doesn't scale to a fleet.** This works well for nine nodes and one operator. A team managing hundreds of machines needs real config management.
 
 ## What a stolen key gets you

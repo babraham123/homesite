@@ -45,7 +45,6 @@ GPU passthrough (VFIO) gives the VM exclusive, native access to the physical GPU
 
 - **Check your IOMMU groups first.** An IOMMU group is the smallest set of PCI devices the hardware can isolate from each other, and a VM has to get the whole group. The GPU and its HDMI audio function usually share a group, so they need to be passed through together. If the audio device doesn't come along, you get video with no sound and a confusing afternoon.
 - **Set the VM's virtual display to `none`.** If a virtual display is still attached, Sunshine may encode that instead of the GPU output. You'll see a black stream and no error anywhere.
-- **Use VirtIO drivers** for disk and network. Without them the VM is painfully slow.
 - **Test hookscripts on their own.** These are Proxmox's VM start/stop hooks that bind and unbind the GPU, and they fail silently when misconfigured.
 
 The host keeps the CPU's integrated graphics for its own console. The Nvidia card goes to one VM at a time: the hookscript shuts down my Linux desktop VM and unbinds the card before the gaming VM starts, and hands it back afterward.

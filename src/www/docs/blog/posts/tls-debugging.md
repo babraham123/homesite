@@ -55,8 +55,6 @@ That's where I found the problem. The cert's subject was the internal hostname, 
 
 Logins still failed, but with a different error, which at least meant progress. Authelia was now logging `redirect_uri did not match any registered URIs`, because Grafana's OIDC registration still had the callback URL from before the TLS change. The browser showed the exact same symptom, but the root cause was completely unrelated. TLS errors and OAuth misconfigurations look the same from the outside, and only the logs tell them apart.
 
-That wasn't the last issue, though. Services on the same VM as Authelia couldn't fetch its OIDC discovery document. Their requests to `auth.<domain>` loop back through Traefik, so they needed to trust Traefik's certificate chain, but the internal CA had only been distributed to containers with explicit cert mounts. This applies more broadly: **every client needs to trust the CA, including services you didn't think of as clients.**
-
 ## TL;DR: The debugging playbook
 
 1. Test each hop separately, from the inside out, using `curl` or `openssl s_client` against each layer directly.
