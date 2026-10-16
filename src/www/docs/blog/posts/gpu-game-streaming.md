@@ -57,7 +57,7 @@ As for latency, playing on a wired Raspberry Pi at 1080p60 felt almost indisting
 
 ## Administering Windows like a Linux box
 
-Since the VM has no monitor, I manage it like every other node in the lab: over SSH, with a [PowerShell dispatcher](https://github.com/babraham123/homelab/blob/main/src/gaming/Dispatcher.ps1.j2) that only accepts a short list of commands (mostly starting and stopping Sunshine). The "start gaming" button on my phone chains three of those commands across the router, pve2, and the VM, and none of the credentials involved can run arbitrary commands. [A separate post](ssh-dispatcher.md) covers how that works.
+Since the VM has no monitor, I manage it like every other node in the lab: over SSH, with a [PowerShell dispatcher](https://github.com/babraham123/homelab/blob/main/src/nodes/gaming/Dispatcher.ps1.j2) that only accepts a short list of commands (mostly starting and stopping Sunshine). The "start gaming" button on my phone chains three of those commands across the router, pve2, and the VM, and none of the credentials involved can run arbitrary commands. [A separate post](ssh-dispatcher.md) covers how that works.
 
 ## Should you build one?
 
