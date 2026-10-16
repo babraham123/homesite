@@ -1,67 +1,46 @@
 # Podman setup
-Initial setup to install Proxmox and configure it with the relevant scripts and services.
+
+Initial setup to install Podman on a Debian VM or the VPS and configure it with the relevant scripts
+and services.
 
 - Setup [Debian Linux](./debian.md)
 - Make sure to do VM Host setup for [PVE1](./pve1.md) and [PVE2](./pve2.md).
-- Review container security measures, for example [ref](https://www.panoptica.app/research/7-ways-to-escape-a-container)
+- Review container security measures, for example
+  [ref](https://www.panoptica.app/research/7-ways-to-escape-a-container)
 
 ## Install Podman
+
 - Install dependencies
+
 ```bash
 sudo su
-apt install -y age jq python3-pip gnupg2 zstd
-pip3 install --break-system-packages jinjanator jinjanator-plugin-ansible passlib "bcrypt==4.0.1"
-
-YQ_VERSION=$(curl -s "https://api.github.com/repos/mikefarah/yq/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+')
-wget "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64.tar.gz" -O - | tar xz
-mv yq_linux_amd64 /usr/bin/yq
-./install-man-page.sh
-rm yq* install-man-page.sh
+apt install -y age jq gnupg2 zstd
+/root/homelab-rendered/src/base/debian/install_render_tools.sh
 ```
 
-- Install podman: [ref](https://podman.io/docs/installation#linux-distributions), [ref2](https://computingforgeeks.com/how-to-install-podman-on-debian/)
-```bash
-source /etc/os-release
-curl -fsSL https://download.opensuse.org/repositories/home:/alvistack/Debian_$VERSION_ID/Release.key \
-  | gpg --dearmor \
-  | tee /etc/apt/trusted.gpg.d/alvistack.gpg > /dev/null
-echo "deb http://downloadcontent.opensuse.org/repositories/home:/alvistack/Debian_$VERSION_ID/ /" \
-  | tee /etc/apt/sources.list.d/alvistack.list > /dev/null
+- Install podman: [ref](https://podman.io/docs/installation#linux-distributions),
+  [ref2](https://computingforgeeks.com/how-to-install-podman-on-debian/)
 
-apt update
-apt -y upgrade
-apt -y install podman podman-netavark podman-aardvark-dns podman-compose libgpgme11-dev buildah libyajl2 uidmap
-```
-
-- Enable container auto updating
 ```bash
-systemctl enable --now podman-auto-update.timer
+/root/homelab-rendered/src/base/podman/install_podman.sh
 ```
 
 ## Networking
-- Account for conflicts between the podman network and the firewall, [bug](https://stackoverflow.com/questions/70870689/configure-ufw-for-podman-on-port-443)
+
+- Account for conflicts between the podman network and the firewall,
+  [bug](https://stackoverflow.com/questions/70870689/configure-ufw-for-podman-on-port-443)
+- Create the container network. On the VMs this also resets ufw; vpnsvcs keeps
+  [its rules](./vpnsvcs.md#add-public-endpoint)
+
 ```bash
-ufw reset
-# SSH, HTTP
-ufw allow in from any to any port 22,80,443 proto tcp
-# mDNS
-ufw allow in from any to any port 5353 proto udp
-
-cd /root/homelab-rendered
-mkdir /etc/containers/systemd
-cp src/$HOST/net.network /etc/containers/systemd
-systemctl daemon-reload
-systemctl start net-network
-POD_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
-NET_IFACE=$(ip -j -4 route show to default | jq -r '.[0].dev')
-ufw route allow in on $NET_IFACE out on $POD_IFACE to any port 80,443 proto tcp
-
-ufw enable
+/root/homelab-rendered/src/base/podman/install_network.sh
 ```
 
 ## Secrets
+
 - On the VM host, update the SOPS/AGE secrets file if needed
 - Configure secrets
+
 ```bash
 sudo su
 # Read secrets from age-encrypted file
@@ -69,39 +48,59 @@ mkdir -p /etc/opt/secrets
 chmod 700 /etc/opt/secrets
 cp /home/manualadmin/.ssh/id_ed25519* /etc/opt/secrets
 chmod 600 /etc/opt/secrets/*
-cp /root/homelab-rendered/src/podman/containers.conf /etc/containers
-```
-The secret helpers (`src/podman/*.sh`) run in place from `/root/homelab-rendered`;
-nothing is copied, so a deploy updates them.
-```bash
+cp /root/homelab-rendered/src/base/podman/containers.conf /etc/containers
 ```
 
 ## mDNS
+
 - Install dependencies and service
+
 ```bash
-src/debian/install_svcs.sh mdns_repeater
+/root/homelab-rendered/src/base/debian/install_svcs.sh mdns_repeater
 ```
 
 ## Monitoring
+
 - Install Node Exporter
+
 ```bash
 adduser node_exporter --system
 groupadd node_exporter
 usermod -a -G node_exporter node_exporter
 cd /root/homelab-rendered
-src/debian/install_svcs.sh node_exporter
+src/base/debian/install_svcs.sh node_exporter
 ```
 
 - Allow access from metrics container to host in order to scrape node_exporter
+
 ```bash
-# Use 10.10.0.7 on secsvcs, 10.11.0.7 on websvcs, 10.12.0.7 on homesvcs
+# Use 10.10.0.7 on secsvcs, 10.11.0.7 on websvcs, 10.12.0.7 on homesvcs,
+# 10.13.0.7 on vpnsvcs
 ufw allow in from 10.10.0.7 to any port 9100 proto tcp
 ```
 
+## Image updater
+
+Pulls or builds, scans and loads every `localhost/` image, nightly and on install.
+[Maintenance](../maintenance.md#container-images)
+
+- Add `docker_hub_username`, `docker_hub_token` and `ntfy_alert_token` to the node's secrets file
+- Install before any service
+
+```bash
+cd /root/homelab-rendered
+src/base/debian/install_svcs.sh image_updater
+systemctl enable --now image_updater.timer
+systemctl list-timers image_updater.timer
+```
+
 ## Backups
-The scheduled backup is each node's `backup.sh` (see [Services](../services.md#storage-and-backups)); what follows is the manual fallback for a volume it doesn't cover.
+
+Manual fallback for volumes the node's `backup.sh` doesn't cover
+([Services](../services.md#storage-and-backups)).
 
 - Backup container volumes
+
 ```bash
 cd /root/backups
 systemctl list-units | grep Homelab
@@ -117,6 +116,7 @@ systemctl start ALL_SERVICES
 ```
 
 - Restore a container volume
+
 ```bash
 cd /root/backups
 systemctl stop ALL_SERVICES
@@ -126,6 +126,7 @@ systemctl start ALL_SERVICES
 ```
 
 - Backup a container image
+
 ```bash
 cd /root/backups
 podman images --format=json | \

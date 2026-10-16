@@ -1,10 +1,13 @@
 # General Proxmox VM setup
-Guide to create and manage a VM. Includes optimal Proxmox settings, network configuration and backup setup.
-Docs: [config files](https://pve.proxmox.com/wiki/Proxmox_Cluster_File_System_(pmxcfs)),
+
+Guide to create and manage a VM. Includes optimal Proxmox settings, network configuration and backup
+setup. Docs: [config files](https://pve.proxmox.com/wiki/Proxmox_Cluster_File_System_(pmxcfs))
 
 ## VM creation
+
 [ref](https://www.youtube.com/watch?v=sZcOlW-DwrU)
-- Upload OS ISO image, use net install version 
+
+- Upload OS ISO image, use net install version
 - For UEFI host:
   - Machine: q35
   - BIOS: OVMF
@@ -20,17 +23,21 @@ Docs: [config files](https://pve.proxmox.com/wiki/Proxmox_Cluster_File_System_(p
 - Memory
   - Ballooning device (ensure the memory is always available, don't overcommit)
 - OS installation
-  - Use ext4, no lvm, all files in 1 partition [ref](https://forum.proxmox.com/threads/lvm-or-ext4-on-kvm-guest.39055/)
+  - Use ext4, no lvm, all files in 1 partition
+    [ref](https://forum.proxmox.com/threads/lvm-or-ext4-on-kvm-guest.39055/)
 
 Reference links:
+
 - [Display devices](https://www.kraxel.org/blog/2019/09/display-devices-in-qemu/)
 - [BIOS](https://www.reddit.com/r/Proxmox/comments/1acugae/bios_or_uefi_for_linux_vms_for_performance/)
 - [Storage](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_storage)
 
 Maintenance:
+
 - [Resize disks](https://pve.proxmox.com/wiki/Resize_disks#Online_for_Linux_guests_without_LVM)
 
 ## pfSense config
+
 - Record the MAC address from Proxmox, Hardware >> Network Device
 - Create a static DHCP lease in pfSense
   - Go to Services >> DHCP Server >> PVE# >> DHCP Static Mappings
@@ -39,5 +46,7 @@ Maintenance:
   - Go to Services >> DNS Resolver >> Custom options, paste in config
 
 ## Backups
-- VM >> Backup >> Backup now
-- Datacenter >> Backup >> Add / Edit
+
+- Don't add PVE backup jobs; the weekly run images every VM
+  ([Services](../services.md#storage-and-backups))
+- Restores: [restore guide](./restore.md)

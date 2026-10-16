@@ -1,7 +1,7 @@
 # Architecture
 
-A self-hosted private cloud: two Proxmox hosts at home, one cloud VPS as the public
-front door, 6 VMs, and ~30 containerized services, all reproducible from this repo.
+A self-hosted private cloud: two Proxmox hosts at home, one cloud VPS as the public front door, 6
+VMs, and ~30 containerized services, all reproducible from this repo.
 
 Goals:
 
@@ -12,8 +12,8 @@ Goals:
 
 More detail: [Networking](networking.md) · [Security](security.md) · [Services](services.md)
 
-> All IPs and domains in these docs are the placeholder values from `vars.template.yml`.
-> Real values live in the gitignored `vars.yml`.
+> All IPs and domains in these docs are the placeholder values from `vars.template.yml`. Real values
+> live in the gitignored `vars.yml`.
 
 ## System overview
 
@@ -51,8 +51,8 @@ flowchart TB
     end
 
     subgraph store["Storage and backup"]
-        pbs2["Proxmox Backup Server (pbs2) on pve2<br/>VM disks, prune/GC"]
-        hdds["WD HDDs + Blu-ray<br/>bought, not installed in pve2"]
+        pbs2["Proxmox Backup Server (pbs2) on pve2<br/>VM images + host files, prune/GC"]
+        hdds["WD HDDs (websvcs media array) + Blu-ray<br/>bought, not installed in pve2"]
     end
 
     inet -- "TLS :443" --> haproxy
@@ -71,8 +71,8 @@ flowchart TB
     ap -. "VLAN 12" .-> guest
     zigbee -. "Zigbee2MQTT" .-> homesvcs
     sw -.- wdev
-    pve1 -. "backup" .-> pbs2
-    pve2 -. "backup" .-> pbs2
+    pve1 -. "backup_orchestrator:<br/>images + host files" .-> pbs2
+    pve2 -. "images" .-> pbs2
 
     style cloud stroke:#38bdf8,stroke-width:2px,fill:transparent
     style pve1 stroke:#a78bfa,stroke-width:2px,fill:transparent
@@ -93,15 +93,14 @@ flowchart TB
     class hdds,sw planned
 ```
 
-Public traffic enters only through HAProxy on the VPS, which routes by TLS SNI over a
-Tailscale mesh (coordinated by self-hosted Headscale) to a Traefik instance on the
-target VM. Internal clients skip all of that: split-horizon DNS points them straight
-at the VMs. See [Networking](networking.md) for the full path.
+Public traffic enters only through HAProxy on the VPS, which routes by TLS SNI over a Tailscale mesh
+(coordinated by self-hosted Headscale) to a Traefik instance on the target VM. Internal clients skip
+all of that: split-horizon DNS points them straight at the VMs. See [Networking](networking.md) for
+the full path.
 
-Solid links are physical paths: internet transit, NIC ports, the LAN trunk, the
-`vmbr0` bridge. Dotted links are logical, wireless, or not yet built: Tailscale
-tunnels, tagged WiFi VLANs, Zigbee, backup jobs. Grey dashed boxes are hardware that
-is bought or planned but not yet in service.
+Solid links are physical paths: internet transit, NIC ports, the LAN trunk, the `vmbr0` bridge.
+Dotted links are logical, wireless, or not yet built: Tailscale tunnels, tagged WiFi VLANs, Zigbee,
+backup jobs. Grey dashed boxes are hardware that is bought or planned but not yet in service.
 
 ## Hardware
 
@@ -110,25 +109,24 @@ is bought or planned but not yet in service.
 Fanless "router box" mini PC from AliExpress; low idle power (~15–20 W) since it runs 24/7.
 
 | Component | Spec |
-|-----------|------|
+| ----------- | ------ |
 | CPU | Intel Celeron N5105 (4 cores) |
 | RAM | 32 GB DDR4 (2×16 GB) |
 | Storage | 500 GB WD NVMe SSD |
 | NICs | 4× Intel i226 2.5 GbE (`igc0`–`igc3`), PCI-passed to the pfSense VM |
 
-The four physical NICs are passed through to the pfSense router VM, so pve1 itself
-reaches the network only via the virtual bridge `vmbr0` (no physical port; pfSense is
-its gateway). It hosts the router, `secsvcs`, and `homesvcs`, plus the trust roots:
-private CA, SSH CA, SOPS/AGE secrets, and provisioning scripts. It should be the most
-secure host in the system.
+The four physical NICs are passed through to the pfSense router VM, so pve1 itself reaches the
+network only via the virtual bridge `vmbr0` (no physical port; pfSense is its gateway). It hosts the
+router, `secsvcs`, and `homesvcs`, plus the trust roots: private CA, SSH CA, SOPS/AGE secrets, and
+provisioning scripts. It should be the most secure host in the system.
 
 ### pve2: on-demand tower
 
-Custom build in a Phanteks P300A case; ~30 W idle, ~300 W max. Powered on when needed
-(gaming, development, GPU workloads) and off otherwise.
+Custom build in a Phanteks P300A case; ~30 W idle, ~300 W max. Powered on when needed (gaming,
+development, GPU workloads) and off otherwise.
 
 | Component | Spec |
-|-----------|------|
+| ----------- | ------ |
 | Motherboard | Kontron K3843-B (µATX, Intel B660) |
 | CPU | Intel Core i5-13500 (6 P-cores + 8 E-cores) |
 | RAM | 32 GB DDR5-4800 (2×16 GB) |
@@ -137,22 +135,24 @@ Custom build in a Phanteks P300A case; ~30 W idle, ~300 W max. Powered on when n
 | Accelerators | Nvidia Tesla P4 (voice pipeline STT), Coral TPU (camera object detection), Intel iGPU (Quick Sync) |
 | PSU | Corsair RM550x 550 W |
 
-pve2 runs `websvcs`, `devtop`, the Windows `gaming` VM, and Proxmox Backup Server
-(`pbs2`). GPU/PCI passthrough setup is covered in [the GPU guide](guides/gpu.md) and
-[the Proxmox guide](guides/proxmox.md).
+pve2 runs `websvcs`, `devtop`, the Windows `gaming` VM, and Proxmox Backup Server (`pbs2`). GPU/PCI
+passthrough setup is covered in [the GPU guide](guides/gpu.md) and [the Proxmox
+guide](guides/proxmox.md).
 
 ### vpnsvcs: cloud VPS
 
-Smallest Linode shared-CPU instance. The only machine with a public IP. Runs HAProxy,
-Headscale, Tailscale, and the GeoIP map generator directly on the host (no containers).
+Smallest Linode shared-CPU instance. The only machine with a public IP. Runs HAProxy, Headscale,
+Tailscale, the dead-man checker and node_exporter directly on the host; Fluent Bit, vmagent and the
+GeoIP map generator (weekly timer) are Podman quadlets on a bridge network with no published ports,
+as on the VMs.
 
 ### Network gear and peripherals
 
 | Device | Status | Notes |
-|--------|--------|-------|
+| -------- | -------- | ------- |
 | TP-Link EAP660 HD WiFi 6 AP | deployed | wall-mounted, tagged VLANs for trusted/IoT/guest SSIDs |
 | SMLight SLZB-06 Zigbee adapter | deployed | used by Zigbee2MQTT on `homesvcs` |
-| HDDs (WD 3.5") + Blu-ray drive | bought, not yet installed | future bulk media/backup storage on pve2 |
+| HDDs (WD 3.5") + Blu-ray drive | bought, not yet installed | HDDs: websvcs media array on pve2, snapraid + mergerfs |
 | 24-port PoE+ managed switch | planned | unblocks the wired VLANs (20/21) |
 | 4G LTE failover modem | planned | pfSense WAN failover |
 | Rack, patch panel, UPS, PiKVM | planned | |
@@ -160,7 +160,7 @@ Headscale, Tailscale, and the GeoIP map generator directly on the host (no conta
 ## Nodes
 
 | Hostname | Purpose | Host machine |
-|----------|---------|--------------|
+| ---------- | --------- | -------------- |
 | pve1 | Proxmox hypervisor (mini PC), always on | self |
 | pve2 | Proxmox hypervisor (tower), intermittent, has accelerators | self |
 | vpnsvcs | VPN coordinator and public endpoint (Headscale, HAProxy) | Linode |
@@ -171,25 +171,27 @@ Headscale, Tailscale, and the GeoIP map generator directly on the host (no conta
 | devtop | Linux desktop for development and general usage | pve2 |
 | gaming | Windows desktop for PC gaming (Sunshine streaming) | pve2 |
 
-VMs (rather than bare-metal containers) provide isolation, snapshotting, and a clear
-blast radius: each VM owns one concern and its own Traefik ingress, so a compromise or
-a bad deploy stays contained.
+VMs (rather than bare-metal containers) provide isolation, snapshotting, and a clear blast radius:
+each VM owns one concern and its own Traefik ingress, so a compromise or a bad deploy stays
+contained.
 
 ## Key design decisions
 
 Recorded as ADRs in `docs/adr/`:
 
-- [Podman quadlets + systemd instead of Kubernetes or Compose](adr/0001-podman-quadlets-over-kubernetes.md)
+- [Podman quadlets + systemd instead of Kubernetes or
+  Compose](adr/0001-podman-quadlets-over-kubernetes.md)
 - [HAProxy in TCP/SNI-passthrough mode at the edge](adr/0002-haproxy-sni-passthrough.md)
 - [Self-hosted Headscale instead of managed Tailscale](adr/0003-self-hosted-headscale.md)
 - [SOPS + AGE for secrets instead of a secrets manager](adr/0004-sops-age-secrets.md)
-- [SSH forced-command dispatcher instead of a config-management agent](adr/0005-ssh-forced-command-dispatcher.md)
+- [SSH forced-command dispatcher instead of a config-management
+  agent](adr/0005-ssh-forced-command-dispatcher.md)
 - [Declared node inventory instead of parsing configs at render time](adr/0006-node-inventory.md)
+- [VPS metrics pushed by a local vmagent](adr/0007-vps-metrics-pushed.md)
 
 ## Secrets
 
-Secrets stay out of git. They use SOPS + AGE encryption and are written to disk
-encrypted, one file per host, managed from pve1. Podman's shell secrets driver
-decrypts them into containers at startup; `*.j2.j2` second-pass templates render
-secret values into config files for apps that need them there. See
-[Security](security.md#secrets) for the full pipeline.
+Secrets stay out of git. They use SOPS + AGE encryption and are written to disk encrypted, one file
+per host, managed from pve1. Podman's shell secrets driver decrypts them into containers at startup;
+`*.j2.j2` second-pass templates render secret values into config files for apps that need them
+there. See [Security](security.md#secrets) for the full pipeline.

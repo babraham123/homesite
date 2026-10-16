@@ -1,31 +1,40 @@
 # Proxmox setup
 
 ## Hardware & Network
+
 - Setup dedicated LAN in pfSense
-  - Open admin console: https://192.168.1.1/
+  - Open admin console: <https://192.168.1.1/>
   - Configure new interface (PVE#), record gateway details
   - Setup DHCP in `[100,200]` range, add static IP based on MAC
   - Copy firewall rules from LAN
-- Make a [flash drive](https://www.lewan.com/blog/2012/02/10/making-a-bootable-usb-stick-on-an-apple-mac-os-x-from-an-iso) with proxmox [iso](https://www.proxmox.com/en/downloads/category/iso-images-pve) and install
+- Make a [flash
+  drive](https://www.lewan.com/blog/2012/02/10/making-a-bootable-usb-stick-on-an-apple-mac-os-x-from-an-iso)
+  with proxmox [iso](https://www.proxmox.com/en/downloads/category/iso-images-pve) and install
   - F2 during startup to select USB boot
-- Test connection: https://192.168.2.10:8006/ 
+- Test connection: <https://192.168.2.10:8006/>
 
 ## PVE setup
+
 - Shell in with root, password
-- Update deb repository, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/) 
+- Update deb repository, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/)
   - `nano /etc/apt/sources.list`, add `contrib non-free non-free-firmware` to all 3 sources
   - `nano /etc/apt/sources.list.d/pve-enterprise.list`
-```
+
+```text
 # deb https://enterprise.proxmox.com/debian/pve trixie pve-enterprise
 deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
 ```
+
 - Basic [Debian Linux setup](./debian.md)
 - Install special tools
+
 ```bash
 sudo wget https://enterprise.proxmox.com/debian/proxmox-release-trixie.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-trixie.gpg
 sudo apt install -y libguestfs-tools intel-microcode
 ```
-- Collect system stats to help with VM selection 
+
+- Collect system stats to help with VM selection
+
 ```bash
 # Show which CPUs are P (performance) vs E (efficiency)
 lscpu --all --extended
@@ -36,53 +45,65 @@ lsblk
 ```
 
 ## PCI passthrough
+
 [src](https://pve.proxmox.com/wiki/PCI_Passthrough)
 
 ### Intel NIC
+
 - Fix crashes
-	- `sudo vim /etc/network/interfaces`
-```
+  - `sudo vim /etc/network/interfaces`
+
+```text
 iface eno1 inet manual
 	post-up ethtool -K eno1 tso off gso off
 ```
 
 ### GPU
+
 - Update grub
+
 ```bash
 # Check if grub or systemd-boot
 efibootmgr -v
 sudo vim /etc/default/grub
 ```
 
-```
+```sh
 GRUB_CMDLINE_LINUX_DEFAULT="quiet intel_iommu=on iommu=pt initcall_blacklist=sysfb_init"
 ```
+
 ```bash
 sudo update-grub
 ```
+
 - Update modules
   - `sudo vim /etc/modules`
-```
-vfio
-vfio_iommu_type1
-vfio_pci
-vfio_virqfd
-```
-  - `sudo vim /etc/modprobe.d/pve-blocklist.conf`
-```
-# GPU passthru
-blacklist nvidiafb
-blacklist nvidia
-blacklist radeon
-blacklist nouveau
 
-blacklist snd_hda_intel
-blacklist snd_hda_codec_hdmi
-```
+    ```text
+    vfio
+    vfio_iommu_type1
+    vfio_pci
+    vfio_virqfd
+    ```
+
+  - `sudo vim /etc/modprobe.d/pve-blocklist.conf`
+
+    ```text
+    # GPU passthru
+    blacklist nvidiafb
+    blacklist nvidia
+    blacklist radeon
+    blacklist nouveau
+
+    blacklist snd_hda_intel
+    blacklist snd_hda_codec_hdmi
+    ```
+
 - Update BIOS settings
   - Under CPU, confirm that VT-d and VT-x/VMX are enabled
   - Under Graphics, make the iGPU the Primary Display
 - Confirm its works and find PCI id
+
 ```bash
 sudo reboot
 # Confirm that IOMMU is enabled
@@ -95,24 +116,31 @@ find /sys/kernel/iommu_groups/ -type l | sort
 lspci -nnv | grep VGA
 lspci -s 01:00 && lspci -s 01:00 -n
 ```
+
 - In the PVE UI, Go to VM >> Hardware >> Add PCI device
   - Check Raw Device, All Functions, ROM-Bar, PCI-Express. Also Primary GPU if using for display.
 - Reboot the VM
 
 ### iGPU
-Same as GPU, just add the following steps ([ref](https://3os.org/infrastructure/proxmox/gpu-passthrough/igpu-passthrough-to-vm/#linux-virtual-machine-igpu-passthrough-configuration)):
+
+Same as GPU, just add the following steps
+([ref](https://3os.org/infrastructure/proxmox/gpu-passthrough/igpu-passthrough-to-vm/#linux-virtual-machine-igpu-passthrough-configuration)):
+
 - Add another driver to the blocklist
   - `sudo vim /etc/modprobe.d/pve-blocklist.conf`
-```
+
+```text
 # iGPU passthru
 blacklist i915
 ```
+
 ```bash
 sudo reboot
 lspci -nnv | grep VGA
 ```
+
 - Confirm that the iGPU has a dedicated IOMMU group
-  - `/root/homelab-rendered/src/debian/iommu_groups.sh`
+  - `/root/homelab-rendered/src/base/debian/iommu_groups.sh`
 - Change the Display type for all VMs
   - In the PVE UI, Go to VM >> Hardware >> Display
   - Set the display to `VirtIO-GPU` or `none`. For the target VM use `none`
@@ -121,27 +149,35 @@ lspci -nnv | grep VGA
   - Now to turn off the VM, press Shutdown and then Stop
 
 ### Coral TPU
+
 Same as GPU, just add the following steps
-- Block more modules
-  `sudo vim /etc/modprobe.d/pve-blocklist.conf`
-```
+
+- Block more modules `sudo vim /etc/modprobe.d/pve-blocklist.conf`
+
+```text
 # Coral TPU passthru
 blacklist gasket
 blacklist apex
 options vfio-pci ids=1ac1:089a
 ```
+
 ```bash
 sudo reboot
 lspci -nnv | grep TPU
 ```
+
 - In VM setup, uncheck "Pre-Enroll keys" in BIOS
 - If doesn't work, consider `pcie_aspm=off`
-  [ref1](https://github.com/blakeblackshear/frigate/issues/1020), [ref2](https://forum.proxmox.com/threads/guest-internal-error-when-passing-through-pcie.99239/), [ref3](https://www.derekseaman.com/2023/06/home-assistant-frigate-vm-on-proxmox-with-pcie-coral-tpu.html)
+  [ref1](https://github.com/blakeblackshear/frigate/issues/1020),
+  [ref2](https://forum.proxmox.com/threads/guest-internal-error-when-passing-through-pcie.99239/),
+  [ref3](https://www.derekseaman.com/2023/06/home-assistant-frigate-vm-on-proxmox-with-pcie-coral-tpu.html)
 
 ## USB Passthrough
 
 Pass thru physical port, [docs](https://pve.proxmox.com/wiki/USB_Physical_Port_Mapping)
+
 - Get the port details
+
 ```bash
 sudo su
 # Get dev number from device description
@@ -149,20 +185,25 @@ lsusb
 # Get bus and port number
 lsusb -t
 ```
+
 - In the PVE UI, Go to VM >> Hardware >> Add USB device
 - Reboot the VM
 
 ## VM management
+
 [Docs](https://pve.proxmox.com/pve-docs/qm.1.html)
 
 - Watchdog to prevent stuck VM
+
 ```bash
 sudo su
-src/debian/install_svcs.sh vm_watchdog
+/root/homelab-rendered/src/base/debian/install_svcs.sh vm_watchdog
 ```
 
 ## Networking
+
 - Remove unnecessary services (not using HA mode), [src](https://free-pmx.org/guides/ha-disable/)
+
 ```bash
 systemctl stop pve-ha-crm pve-ha-lrm corosync
 systemctl stop watchdog-mux
@@ -175,7 +216,9 @@ install softdog /bin/false
 EOF
 ```
 
-- Firewall setup, [PVE ports](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_ports_used_by_proxmox_ve)
+- Firewall setup, [PVE
+  ports](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_ports_used_by_proxmox_ve)
+
 ```bash
 ufw default allow routed
 ufw allow in from any to any port 22,8006,3128 proto tcp
@@ -186,79 +229,88 @@ ufw enable
 ```
 
 ## Backups
+
 Only installed on PVE2. [Ref](https://pve.proxmox.com/wiki/Backup_and_Restore)
 
 - Update deb repository
   - `vim /etc/apt/sources.list.d/pbs-enterprise.list`
-```
+
+```text
 # NOT recommended for production use
 deb http://download.proxmox.com/debian/pbs trixie pbs-no-subscription
 ```
+
 - Install PBS, [ref](https://pbs.proxmox.com/docs/installation.html)
+
 ```bash
 apt update
 apt install -y proxmox-backup-server proxmox-backup
 ufw allow in from any to any port 8007 proto tcp
 ```
-- Connect to console: https://192.168.2.10:8007/ 
-- Further [setup](https://www.youtube.com/watch?v=33ubleU4OFc), [setup2](https://www.youtube.com/watch?v=Px5eHcUKbbQ)
+
+- Connect to console: <https://192.168.2.10:8007/>
+- Further [setup](https://www.youtube.com/watch?v=33ubleU4OFc),
+  [setup2](https://www.youtube.com/watch?v=Px5eHcUKbbQ)
   - Storage >> Directory >> Create: Directory
   - Datastore >> backup1
-    - Content tab >> Add Namespace
-      - Add namespaces for pve1, pve2 under Root
-    - Prune & GC tab: leave empty, both come from `prune.sh` (below)
+    - Prune & GC tab: leave empty, `prune.sh` sets both
+    - Content tab >> Add Namespace under Root: `pve1`, `pve2`, `files`
+- Create a backup token per PVE host: write and read its own namespaces, no delete
+  - pve1: store the secret (shown once) as `pbs2_backup_token` in `/root/secrets/pve1.yaml`
+  - pve2: the token goes straight into its storage entry (below); regenerate it here if lost
 
-- Namespaces under Root: `pve1` and `pve2` for the VM images (and `host/vpnsvcs`),
-  `files` for the host backups. Content tab >> Add Namespace. Retention is per
-  namespace, set by pve2's `prune.sh`.
-- Backup identity for pve1: a user and a token that can write and read backups in the
-  `pve1` and `files` namespaces but never delete them. The secret is shown once; it
-  goes into `/root/secrets/pve1.yaml` as `pbs2_backup_token` on pve1.
 ```bash
 proxmox-backup-manager user create pve1@pbs
 proxmox-backup-manager user generate-token pve1@pbs backup
 proxmox-backup-manager acl update /datastore/backup1/pve1 DatastoreBackup --auth-id 'pve1@pbs!backup'
 proxmox-backup-manager acl update /datastore/backup1/files DatastoreBackup --auth-id 'pve1@pbs!backup'
+proxmox-backup-manager user create pve2@pbs
+proxmox-backup-manager acl update /datastore/backup1/pve2 DatastoreBackup --auth-id 'pve2@pbs!backup'
 ```
-- Client encryption key, on pve1. Everything pve1 sends is encrypted with it; the key
-  file is in the escrow set and nothing restores without it.
+
+- On pve1, create the client encryption key. Escrow it: nothing restores without it
+
 ```bash
 proxmox-backup-client key create --kdf none /root/secrets/pbs_client.key
 chmod 400 /root/secrets/pbs_client.key
 ```
-- PVE storage on both hosts, [ref](https://pbs.proxmox.com/docs/pve-integration.html).
-  No fingerprint: the PBS cert is Let's Encrypt derived (`acme_transfer.sh`).
+
+- Add the PVE storage on both hosts, [ref](https://pbs.proxmox.com/docs/pve-integration.html)
+
 ```bash
+# pve2: the fingerprint
+proxmox-backup-manager cert info | grep Fingerprint
 # pve1: the token, the key, namespace pve1
 pvesm add pbs pbs2 --server pbs2.janedoe.com --datastore backup1 --namespace pve1 \
   --username 'pve1@pbs!backup' --password "$(sops -d /root/secrets/pve1.yaml | yq .pbs2_backup_token)" \
-  --encryption-key /root/secrets/pbs_client.key --content backup
-# pve2: PBS is local; root@pam, namespace pve2. Same key (copied from pve1) so every
-# image in the datastore is ciphertext.
+  --fingerprint 'FINGERPRINT' --encryption-key /root/secrets/pbs_client.key --content backup
+# pve2: its own token, namespace pve2, the same key copied from pve1
 pvesm add pbs pbs2 --server pbs2.janedoe.com --datastore backup1 --namespace pve2 \
-  --username root@pam --password ROOT_PASSWORD --encryption-key /root/pbs_client.key --content backup
+  --username 'pve2@pbs!backup' \
+  --password "$(proxmox-backup-manager user generate-token pve2@pbs backup --output-format json | jq -r .value)" \
+  --fingerprint 'FINGERPRINT' --encryption-key /root/secrets/pbs_client.key --content backup
 pvesm status
 ```
-- No backup jobs in the PVE UI (Datacenter >> Backup must be empty on both hosts) and
-  no prune or GC job made in the PBS UI: the schedule is `src/pve1/backup_orchestrator.timer`
-  (Saturday 02:00), and its last step runs pve2's `prune.sh`, which creates or updates
-  the prune jobs `images-pve1`, `images-pve2` (keep last 1, weekly 2, monthly 2) and
-  `files` (last 1, weekly 3, monthly 6), runs them, then garbage collection.
-- The host configs (`/etc/pve`, `/etc/proxmox-backup`) are staged by each host's
-  `backup.sh` and end up in pve1's `/root/backups/`, so PBS's own config is kept
-  outside PBS. Restores: [the restore guide](./restore.md).
+
+- Leave Datacenter >> Backup empty on both hosts, and add no prune or GC jobs in PBS.
+  `backup_orchestrator.timer` on pve1 schedules everything
+  ([retention](../services.md#storage-and-backups))
+- Restores: [restore guide](./restore.md)
 
 ## Monitoring
+
 - Install Node Exporter
+
 ```bash
 adduser node_exporter --system
 groupadd node_exporter
 usermod -a -G node_exporter node_exporter
 cd /root/homelab-rendered
-src/debian/install_svcs.sh node_exporter
+src/base/debian/install_svcs.sh node_exporter
 ```
 
 - Allow access from metrics container in order to scrape node_exporter
+
 ```bash
 # Use 192.168.4.20 on pve1, 192.168.2.20 on pve2
 ufw allow in from 192.168.4.20 to any port 9100 proto tcp
@@ -268,19 +320,26 @@ ufw allow in from 192.168.4.20 to any port 9100 proto tcp
   - Go to Datacenter >> Permissions >> Users >> Add, name = api_ro
   - Go to Permissions >> Add >> User Permission
   - path = /, user = api_ro@pam, role = PVEAuditor, propagate = check
-  - For PBS, Permissions -> Access Control, PVEAuditor -> Audit. Generate a user password:
+  - For PBS, Permissions -> Access Control, PVEAuditor -> Audit. Store its password as
+    `pbs2_api_password`:
+
 ```bash
 ssh manualadmin@pve1
-sudo /root/homelab-rendered/src/pve1/secret_update.sh pve1
+sudo su
+sops /root/secrets/pve1.yaml
 ```
 
-Perform these steps after pve1, secsvcs and victoriametrics is configured (do this for pve1, pve2 and pbs2). [Ref](https://pve.proxmox.com/wiki/External_Metric_Server)
+After pve1, secsvcs and victoriametrics are set up, for pve1, pve2 and pbs2.
+[Ref](https://pve.proxmox.com/wiki/External_Metric_Server)
+
 - Get the metrics admin password and hash credentials
+
 ```bash
 ssh manualadmin@secsvcs
-password=$(sudo /root/homelab-rendered/src/podman/get_secret.sh victoriametrics_admin_password)
+password=$(sudo /root/homelab-rendered/src/base/podman/get_secret.sh victoriametrics_admin_password)
 echo -n "admin:$password" | base64
 ```
+
 - Go to Datacenter >> Metric Server >> Add >> InfluxDB
 - For PBS, go to Configuration >> Metric Server >> Add >> InfluxDB (HTTP)
 - Set:
@@ -294,8 +353,12 @@ echo -n "admin:$password" | base64
 ## Upgrade
 
 ### Minor version
+
 Consider pinning the kernel version
-- [PVE 8.4 guide](https://pve.proxmox.com/wiki/Downloads#Update_a_running_Proxmox_Virtual_Environment_8.x_to_latest_8.4)
+
+- [PVE 9.2
+  guide](https://pve.proxmox.com/wiki/Downloads#Update_a_running_Proxmox_Virtual_Environment_9_to_latest_9.2)
+
 ```bash
 sudo su
 apt update
@@ -306,9 +369,11 @@ systemctl status proxmox-backup-proxy.service proxmox-backup.service
 ```
 
 ### From PVE 7 to 8 (bullseye to bookworm)
+
 - Make sure the VM backups are up to date
 - [PVE guide](https://pve.proxmox.com/wiki/Upgrade_from_7_to_8)
 - [PBS guide](https://pbs.proxmox.com/wiki/index.php/Upgrade_from_2_to_3#In-place_Upgrade)
+
 ```bash
 sudo su
 screen
@@ -332,9 +397,11 @@ apt upgrade
 ```
 
 ### From PVE 8 to 9 (bookworm to trixie)
+
 - Make sure the VM backups are up to date
 - [PVE guide](https://pve.proxmox.com/wiki/Upgrade_from_8_to_9)
 - [PBS guide](https://pbs.proxmox.com/wiki/Upgrade_from_3_to_4)
+
 ```bash
 sudo su
 screen

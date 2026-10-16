@@ -1,11 +1,14 @@
 # Debian Linux setup
+
 Initial setup for any Debian Linux instance. Configures the shell, ssh access and useful utilities.
 
 - First do the basic [VM setup](./vm.md) if it's a VM running on Proxmox.
 
 ## OS
+
 [Vid](https://www.youtube.com/watch?v=XEoO1FgIel4)
-- If running, temporarily stop the vm_watchdog service on PVE1.
+
+- If running, temporarily stop the vm_watchdog service on the VM's Proxmox host.
 - Use graphical install, run through the options.
   - Leave name blank, username: manualadmin
   - Partition disks: Guided - use entire disk
@@ -14,47 +17,59 @@ Initial setup for any Debian Linux instance. Configures the shell, ssh access an
 - Go to Hardware >> CD/DVD Drive >> Remove
 - Go to Console
   - If desktop VM, open Terminal app. Otherwise login as root.
+
 ```bash
 apt install -y ssh sudo
 usermod -aG sudo manualadmin
 ```
 
 ## Packages
+
 - SSH in
+
 ```bash
 ssh manualadmin@HOSTNAME
 sudo su
 ```
-- Fix deb repository, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/) 
-	- `nano /etc/apt/sources.list`
-	- add `contrib non-free non-free-firmware` to all Debian sources
+
+- Fix deb repository, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/)
+  - `nano /etc/apt/sources.list`
+  - add `contrib non-free non-free-firmware` to all Debian sources
 - Install basics
+
 ```bash
 apt update
 apt upgrade
 apt install -y zsh vim iproute2 git less curl wget zip unzip ethtool jq unattended-upgrades ufw screen zstd
+# python3: node scripts such as image_updater.py
+apt install -y python3
 chsh -s /bin/zsh
 
 # enable firewall
 ufw allow ssh
 ufw enable
 ```
+
 - Configure updates
-	- `vim /etc/apt/apt.conf.d/50unattended-upgrades`
-  - Uncomment `-updates`
+  - `vim /etc/apt/apt.conf.d/50unattended-upgrades`
+    - Uncomment `-updates`
 
 ## SSH
+
 - Set timezone
   - `timedatectl set-timezone America/Los_Angeles`
 - Change hostname
-	- `hostnamectl set-hostname SUBDOMAIN`
-	- `vim /etc/hosts`, add `127.0.1.1    SUBDOMAIN.janedoe.com    SUBDOMAIN`
+  - `hostnamectl set-hostname SUBDOMAIN`
+  - `vim /etc/hosts`, add `127.0.1.1    SUBDOMAIN.janedoe.com    SUBDOMAIN`
 - Lock down SSH
-	- `vim /etc/ssh/sshd_config`
-```
+  - `vim /etc/ssh/sshd_config`
+
+```text
 PermitRootLogin no
 ```
+
 - Generate SSH key
+
 ```bash
 exit
 cd ~
@@ -64,7 +79,9 @@ ssh-add ~/.ssh/id_ed25519
 ```
 
 ## ZSH
+
 - Install tools, [src](https://gist.github.com/sinadarvi/7b7178cb3cf9a605ab04700cae05287a)
+
 ```bash
 sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 
@@ -83,23 +100,28 @@ cd ~
 wget -O .vimrc https://raw.githubusercontent.com/amix/vimrc/master/vimrcs/basic.vim
 echo 'export EDITOR="vim"' >> ~/.zshrc
 ```
+
 - `vim ~/.zshrc`
-```
+
+```zsh
 ...
 ZSH_THEME="powerlevel10k/powerlevel10k"
 ...
 plugins=(zsh-autosuggestions zsh-syntax-highlighting git)
 ```
-- Copy files from source repo, under `src/debian`
+
+- Copy files from source repo, under `src/base/debian`
   - `vim ~/.oh-my-zsh/custom/aliases.zsh`
   - `vim ~/.oh-my-zsh/custom/functions.zsh`
   - `sudo vim /root/.zshrc`
 
 - Logout and log back in. Configure oh-my-zsh
-	- Answers: `yyyy211n1311111y1y`
+  - Answers: `yyyy211n1311111y1y`
 
 ## Homelab Repo
+
 - Install the homelab source code
+
 ```bash
 exit
 # From your local machine
@@ -109,31 +131,32 @@ tools/upload_src.sh SUBDOMAIN "$out"
 ```
 
 ## Automation
+
 - Create user and setup SSH
+
 ```bash
 # Create user
 ssh manualadmin@SUBDOMAIN
 sudo su
 adduser autoadmin
-usermod -aG sudo autoadmin
-su - autoadmin
-# Create and add key
-ssh-keygen -t ed25519 -C "autoadmin@$(hostname).janedoe.com"
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519
-exit
+# No sudo group; root owns the home so nothing can plant .bashrc or .ssh files
+chown root:root /home/autoadmin
+chmod 755 /home/autoadmin
 # Install configs
-/root/homelab-rendered/src/debian/commands.sh install_dispatcher
+/root/homelab-rendered/src/base/debian/commands.sh install_dispatcher
 ```
 
 ## Backups
-- Setup a destination
+
+- Setup a destination for manual dumps (weekly backups stage in `/var/opt/backups`)
+
 ```bash
 mkdir /root/backups
 chmod 700 /root/backups
 ```
 
 ## Upgrade to Trixie (for reference)
+
 ```bash
 sudo su
 screen
@@ -179,4 +202,5 @@ apt modernize-sources
 apt update
 apt upgrade
 ```
+
 - If the interface name changes, recreate the ufw rules

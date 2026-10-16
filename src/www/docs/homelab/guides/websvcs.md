@@ -1,0 +1,154 @@
+# Web Services setup
+
+Guide to setup websvcs on PVE2. Just service installation.
+
+- Setup [Podman](./podman.md)
+
+## Initialize Guacamole DB
+
+- Create the tables, [ref](https://guacamole.apache.org/doc/gug/postgresql-auth.html)
+
+```bash
+ssh manualadmin@secsvcs
+sudo /root/homelab-rendered/src/nodes/secsvcs/init_guacamole_db.sh
+exit
+```
+
+- Remember to handle any subsequent upgrades
+
+## Setup containers
+
+- Install and start containers. Each install loads its images through the
+  [image updater](./podman.md#image-updater)
+
+```bash
+cd /root/homelab-rendered
+# Needs the bouncer key and WAF cert: secsvcs guide, Traefik WAF
+src/nodes/websvcs/install_svcs.sh traefik
+src/nodes/websvcs/install_svcs.sh crowdsec_appsec
+src/nodes/websvcs/install_svcs.sh vmagent
+src/nodes/websvcs/install_svcs.sh nginx
+src/nodes/websvcs/install_svcs.sh homepage
+src/nodes/websvcs/install_svcs.sh isso
+src/nodes/websvcs/install_svcs.sh guacd
+src/nodes/websvcs/install_svcs.sh guacamole
+src/nodes/websvcs/install_svcs.sh copyparty
+# Once the media array is mounted (pve2_storage.md)
+src/nodes/websvcs/install_svcs.sh linkding
+src/nodes/websvcs/install_svcs.sh readeck
+src/nodes/websvcs/install_svcs.sh storyteller
+# Once the API tokens are in the secrets file (Bootstrap the reading apps)
+src/nodes/websvcs/install_svcs.sh bookmark_handoff
+# Once the GPU is set up (Hardware acceleration) and a voice is in place
+# src/nodes/websvcs/install_svcs.sh calliope
+
+# src/nodes/websvcs/install_svcs.sh go2rtc
+# src/nodes/websvcs/install_svcs.sh piper
+# src/nodes/websvcs/install_svcs.sh whisper
+# src/nodes/websvcs/install_svcs.sh openwakeword
+
+# Once fred_api_key is in the secrets file, if ticker.rates lists FRED series
+src/nodes/websvcs/install_svcs.sh finance_exporter
+src/nodes/websvcs/install_svcs.sh fluentbit
+
+systemctl restart node_exporter
+systemctl restart mdns_repeater
+systemctl list-units | grep Homelab
+# Expect every image unchanged
+src/base/podman/image_updater.py --dry-run
+```
+
+## GPU metrics
+
+- Install the [GPU drivers](./gpu.md), then the exporter
+
+```bash
+cd /root/homelab-rendered
+src/base/debian/install_svcs.sh nvidia_gpu_exporter
+ufw allow in from 10.11.0.7 to any port 9835 proto tcp
+curl -s localhost:9835/metrics | grep nvidia_smi_temperature_gpu
+```
+
+## Bootstrap the Guacamole admin
+
+Map an LLDAP group to a Guacamole admin group, then delete `guacadmin`.
+[Ref](https://guacamole.apache.org/doc/gug/administration.html)
+
+- In LLDAP, create the `guacamole_admin` group and add yourself to it
+- Temporarily show the password login form next to SSO
+
+```bash
+sudo su
+sed -i 's/^Environment=EXTENSION_PRIORITY=openid$/Environment=EXTENSION_PRIORITY=*, openid/' /etc/containers/systemd/guacamole.container
+systemctl daemon-reload
+systemctl restart guacamole
+```
+
+- At `https://remote.janedoe.com`, log in as `guacadmin` / `guacadmin`
+- Go to Settings >> Groups >> New Group
+  - Group name = `guacamole_admin` (must match the LLDAP group exactly)
+  - Permissions: check Administer system and all the Create boxes
+  - Save
+- Restore SSO-only login from the rendered quadlet
+
+```bash
+cd /root/homelab-rendered
+src/nodes/websvcs/install_svcs.sh guacamole
+exit
+```
+
+- Log in through Authelia and confirm that Settings >> Connections >> New Connection appears
+- Go to Settings >> Users, delete `guacadmin`
+
+## Bootstrap the reading apps
+
+Usage: [reading guide](./reading.md)
+
+- In LLDAP, create the `readeck_admin` and `storyteller_admin` groups and add yourself to both,
+  before signing in to either app
+- Generate the `readeck_oidc_*` and `storyteller_oidc_*` secrets for secsvcs, copy the ids and plain
+  secrets into websvcs's file, add `storyteller_secret_key`, and reinstall Authelia
+
+```bash
+ssh manualadmin@pve1
+sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh secsvcs
+sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh websvcs
+# on secsvcs
+sudo /root/homelab-rendered/src/nodes/secsvcs/install_svcs.sh authelia
+```
+
+- linkding: open `https://archive.janedoe.com`
+  - Settings >> Integrations: create a REST API token, save it as `linkding_api_token`
+  - Settings >> General: check that automatic HTML snapshots are on
+- Readeck: sign in at `https://read.janedoe.com`
+  - Profile >> API tokens: create a token with `bookmarks:read` and `bookmarks:write`, save it as
+    `readeck_api_token`
+  - Install `bookmark_handoff`
+- Storyteller: open `https://books.janedoe.com`
+  - Create the local admin with a long password, keep it in the password manager (OPDS readers use
+    it)
+  - Sign out, sign in with Authelia
+  - Collections >> New: `Articles`
+  - Settings >> Import: add a watch rule for `/library/books`, and one for `/library/articles`
+    assigned to Articles. Import mode `reference`
+- Calliope: put a ~15 s reference recording at `/etc/opt/calliope/voices/default.wav`, others as
+  `<name>.wav` next to it
+  - Install `calliope`; `bookmark_handoff` queues `listen` articles once its inbox exists
+
+## Hardware acceleration
+
+Nvidia GPU (Whisper and other models), Intel iGPU (transcoding), Coral TPU (Frigate).
+
+- Disable secure boot, [vid](https://www.youtube.com/watch?v=js_Xoa0f8zM)
+
+- Passthrough the GPU, iGPU and TPU using the [Proxmox guide](./proxmox.md)
+
+- Install Nvidia, Intel and Coral drivers using the [GPU guide](./gpu.md)
+
+- Install the Nvidia container toolkit and CDI,
+  [ref](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
+```bash
+sudo su
+/root/homelab-rendered/src/base/podman/install_nvidia_toolkit.sh
+```

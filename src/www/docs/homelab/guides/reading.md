@@ -1,0 +1,79 @@
+# Reading, archiving and listening
+
+Client setup for the reading apps. Install them first:
+[websvcs](./websvcs.md#bootstrap-the-reading-apps).
+
+```mermaid
+flowchart LR
+    browser["Browser: SingleFile +<br/>linkding extension"] --> linkding
+    pinkt["Pinkt, iOS shortcut"] --> linkding
+    linkding["linkding<br/>archive.janedoe.com"] -- "tag toread<br/>(every 15 min)" --> readeck
+    readeck["Readeck<br/>read.janedoe.com"] -- "label listen<br/>(every 15 min)" --> calliope
+    inbox["EPUB in the narrate inbox"] --> calliope
+    calliope["Calliope on the P4"] --> storyteller["Storyteller<br/>books.janedoe.com"]
+```
+
+- linkding: bookmarks and full-page copies
+- Readeck: article text, highlights, EPUB export
+- Calliope: narrates EPUBs into read-along EPUBs
+- Storyteller: serves read-along books to its apps and OPDS readers
+- Away from home, the apps and extensions need the VPN; the web UIs work anywhere via Authelia
+
+## Save pages to linkding
+
+- Desktop browsers and Firefox for Android,
+  [ref](https://linkding.link/archiving/#using-the-linkding-browser-extension)
+  - Install both extensions from the same store, or the integration fails
+  - Install SingleFile. Options >> Destination >> upload to a REST form API
+    - URL = `https://archive.janedoe.com/api/bookmarks/singlefile/`
+    - authorization token = a linkding REST token (Settings >> Integrations)
+    - data field name = `file`, URL field name = `url`
+  - Install the linkding extension
+    - URL = `https://archive.janedoe.com`, same token
+    - Enable "Run Singlefile after adding new bookmark"
+  - To re-snapshot an existing bookmark, press the SingleFile button
+- Android: [Pinkt](https://github.com/fibelatti/pinboard-kotlin), set to linkding with
+  `https://archive.janedoe.com` and a REST token
+- iOS: the "Add To Linkding" shortcut from linkding's [how-to](https://linkding.link/how-to/)
+- Bookmarks not saved via SingleFile get an anonymous server-side snapshot (no logged-in pages)
+
+## Read in Readeck
+
+- Tag a bookmark `toread` in linkding; within 15 min it's in Readeck and retagged `readeck`
+- Errors: `journalctl -u bookmark_handoff`
+- Clients sign in through Readeck, then Authelia
+  - Readeck browser extension (Firefox, Chrome)
+  - Readeck apps for Android and iOS
+- Text-to-speech: the iOS app or the phone's read-aloud
+
+## Listen
+
+- Articles: label `listen` in Readeck
+  - Within 15 min it's queued for Calliope and relabeled `narrated`
+  - When done, it's in Storyteller's Articles collection and ntfy sends a notification
+- Books: copy a DRM-free `Title.epub` into `/srv/media/books/narrate/inbox`
+  - Optionally add `Title.json`:
+
+    ```json
+    {"lang": "en", "voice": "default", "collection": "books"}
+    ```
+
+  - `lang`: English uses Chatterbox Turbo, others Chatterbox Multilingual
+  - `voice`: `/etc/opt/calliope/voices/<voice>.wav`, about 15 s of clean speech
+  - `collection`: folder under `/srv/media/books/readalouds`; Storyteller watches `books` and
+    `articles`
+- Books run one at a time, oldest first, while pve2 is up; an interrupted book resumes
+- Output: `readalouds/<collection>/<Title>/Title.readaloud.epub` and a JSON report of failed
+  sentences
+- On failure: inputs and report in `narrate/failed/<Title>/`; move the book back to the inbox to
+  resume
+- The P4 is shared with whisper: voice commands slow down while a book narrates
+
+## Read along in Storyteller
+
+- Storyteller app (Android, iOS): add `https://books.janedoe.com`, sign in through Authelia
+  - Download a book to read offline; position syncs when back online
+- OPDS (Readest, KOReader): `https://books.janedoe.com/opds/v2`, local Storyteller account,
+  LAN or VPN only
+  - Readest plays the audio with highlighting at 1.0× speed
+- Edits to a book in Storyteller are lost if the book is narrated again
