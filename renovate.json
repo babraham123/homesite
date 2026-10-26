@@ -1,0 +1,47 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
+  "dependencyDashboardOSVVulnerabilitySummary": "unresolved",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Tools installed by version in CI",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s+\\w+: (?<currentValue>\\S+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "mkdocs and its plugins move together",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "groupName": "mkdocs"
+    },
+    {
+      "matchPackageNames": [
+        "lycheeverse/lychee"
+      ],
+      "extractVersion": "^lychee-v(?<version>.+)$",
+      "versioning": "semver"
+    }
+  ]
+}
