@@ -31,19 +31,25 @@ src/nodes/homesvcs/install_svcs.sh zigbee2mqtt
 src/nodes/homesvcs/install_svcs.sh home_assistant
 src/nodes/homesvcs/install_svcs.sh fluentbit
 
-systemctl restart node_exporter
 systemctl restart mdns_repeater
 systemctl list-units | grep Homelab
 # Every image unchanged: the installs just loaded them
-src/base/podman/image_updater.py --dry-run
+image_updater --dry-run
 ```
 
+- Home Assistant config: `src/services/home_assistant/config` is installed to
+  `/etc/opt/home_assistant/config`, mounted writable at `/config/homelab`;
+  `/config/configuration.yaml` and `custom_sentences` link into it. The UI's
+  `automations.yaml`, `scripts.yaml` and `scenes.yaml`, and `.storage`, stay in the
+  `hassconfig` volume. Edits under `/etc/opt/home_assistant/config` can be tried with a
+  restart, but the next install stops on them, with a diff, until they're in git or discarded
+  (`rm -r /etc/opt/home_assistant/config.installed`). An install checks the new config in the
+  running container (`check_config`) before restarting, and puts the old one back if it fails.
 - On initial install, disable HA OIDC
 
 ```bash
 # Comment out the sections called `auth_oidc`
-volpath=$(podman volume inspect -f '{{ .Mountpoint }}' systemd-hassconfig)
-vim $volpath/configuration.yaml
+vim /etc/opt/home_assistant/config/configuration.yaml
 systemctl restart home_assistant
 ```
 
@@ -79,6 +85,12 @@ ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.21.0/24 to any p
 
 - Create an `admin` account
 - Go thru the setup wizard
+- Check the HTTP settings: Settings >> System >> Network. A first boot imports them from
+  `configuration.yaml`'s `http:` block; without them Traefik's requests get 400s
+  - Use X-Forwarded-For on; trusted proxies `10.12.0.6`,
+    `10.12.0.1`, `127.0.0.1`, `::1`
+  - IP ban on, login attempts threshold 5
+  - CORS allowed origins `https://home.janedoe.com`, `https://auth.janedoe.com`
 - Go to Admin >> enable Advanced Mode
 - Setup areas
   - Go to Settings >> Areas, ... >> create any missing areas
@@ -136,7 +148,7 @@ ssh -t manualadmin@pve1 'sudo /root/homelab-rendered/src/nodes/pve1/secret_updat
 
 ```bash
 # Uncomment the sections called `auth_oidc`
-vim $volpath/configuration.yaml
+vim /etc/opt/home_assistant/config/configuration.yaml
 systemctl restart home_assistant
 ```
 

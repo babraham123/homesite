@@ -58,18 +58,17 @@ done
 
 ```bash
 /root/homelab-rendered/src/nodes/pve1/init_secrets.sh
-source ~/.zshrc
 cd /root/secrets
 ```
 
-- Generate the SOPS pve1 secrets file
+- Generate the pve1 secrets file
 
 ```bash
 # Fill in all of the secrets you can based on `src/nodes/pve1/secrets_template.yaml`
-sops /root/secrets/pve1.yaml
+/root/homelab-rendered/src/nodes/pve1/secret_update.sh pve1
 ```
 
-- Generate the SOPS/AGE secsvcs secrets file
+- Generate the secsvcs secrets file
 
 ```bash
 scp manualadmin@secsvcs:/home/manualadmin/.ssh/id_ed25519.pub secsvcs_id_ed25519.pub
@@ -78,7 +77,7 @@ chmod 400 secsvcs_id_ed25519.pub
 /root/homelab-rendered/src/nodes/pve1/secret_update.sh secsvcs
 ```
 
-- Generate the SOPS/AGE websvcs secrets file
+- Generate the websvcs secrets file
 
 ```bash
 scp manualadmin@websvcs:/home/manualadmin/.ssh/id_ed25519.pub websvcs_id_ed25519.pub
@@ -87,7 +86,7 @@ chmod 400 websvcs_id_ed25519.pub
 /root/homelab-rendered/src/nodes/pve1/secret_update.sh websvcs
 ```
 
-- Generate the SOPS/AGE homesvcs secrets file
+- Generate the homesvcs secrets file
 
 ```bash
 scp manualadmin@homesvcs:/home/manualadmin/.ssh/id_ed25519.pub homesvcs_id_ed25519.pub
@@ -151,8 +150,13 @@ openssl verify -CAfile intermediate/certs/ca-chain.cert.pem intermediate/certs/w
 mkdir /root/acme
 cd /root/acme
 TCD_VERSION=$(curl -s "https://api.github.com/repos/ldez/traefik-certs-dumper/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+')
-wget "https://github.com/ldez/traefik-certs-dumper/releases/download/v${TCD_VERSION}/traefik-certs-dumper_v${TCD_VERSION}_linux_amd64.tar.gz" -O - | tar xz
+url="https://github.com/ldez/traefik-certs-dumper/releases/download/v${TCD_VERSION}"
+tcd="traefik-certs-dumper_v${TCD_VERSION}_linux_amd64.tar.gz"
+wget "$url/$tcd" "$url/traefik-certs-dumper_${TCD_VERSION}_checksums.txt"
+sha256sum --check --ignore-missing "traefik-certs-dumper_${TCD_VERSION}_checksums.txt"
+tar xzf "$tcd"
 mv traefik-certs-dumper /usr/local/bin/traefik-certs-dumper
+rm "$tcd" "traefik-certs-dumper_${TCD_VERSION}_checksums.txt"
 # Wait until the services in secsvcs, websvcs and homesvcs are started
 /root/homelab-rendered/src/nodes/pve1/certificates/acme_transfer.sh
 ```
@@ -165,9 +169,9 @@ mv traefik-certs-dumper /usr/local/bin/traefik-certs-dumper
   [Ref](https://support.google.com/accounts/answer/185833?hl=en)
 
 ```bash
-# Update sops files
+# Update the secrets files
 /root/homelab-rendered/src/nodes/pve1/secret_update.sh secsvcs
-sops /root/secrets/pve1.yaml
+/root/homelab-rendered/src/nodes/pve1/secret_update.sh pve1
 ```
 
 - Setup notifications

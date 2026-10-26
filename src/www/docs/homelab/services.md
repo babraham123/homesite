@@ -30,6 +30,7 @@ Container catalog, host services, observability and backups. Hostnames use the p
 | .15 | olive_tin | olivetin | Web buttons for admin actions (via SSH dispatcher) | command.janedoe.com |
 | .16 | crowdsec | crowdsec | IP bans from the logs, LAPI for the VPS's bouncer ([Security](security.md#the-edge-haproxy)) | crowdsec (internal DNS only), port 8455 |
 | .17 | vaultwarden | vaultwarden/server | Password manager, public, SSO-only via Authelia | vault.janedoe.com |
+| .18 | ntfy_idp_push | ntfy-idp-push | Mobile push for Authelia over ntfy; people's ntfy accounts from LLDAP | idp-push.janedoe.com |
 | .20 | fluentbit | fluent-bit | Journal → VictoriaLogs forwarder | n/a |
 | .23 | crowdsec_appsec | crowdsec | WAF for the node's Traefik ([Security](security.md#the-edge-haproxy)) | n/a |
 
@@ -51,7 +52,9 @@ Container catalog, host services, observability and backups. Hostnames use the p
 | .21 | storyteller | storyteller:web-v2 | Read-along book library, OPDS | books.janedoe.com |
 | .22 | calliope | built from babraham123/TTS-Narrated-Ebook-Creator | GPU batch job: EPUB → read-along EPUB | n/a |
 | .23 | crowdsec_appsec | crowdsec | WAF for the node's Traefik ([Security](security.md#the-edge-haproxy)) | n/a |
-| .24 | bookmark_handoff | built from `src/services/bookmark_handoff/` | linkding `toread` → Readeck, Readeck `listen` → Calliope inbox (timer) | n/a |
+| .24 | bookmark_handoff | built from babraham123/bookmark-handoff | linkding `toread` → Readeck, Readeck `listen` → Calliope inbox, linkding `tolisten` → video inbox (timer) | n/a |
+| .25 | yt_to_audiobook | built from babraham123/yt-to-audiobook | Batch job: YouTube audio + captions → read-along EPUB for Storyteller | n/a |
+| .26 | car_ingest | built from babraham123/car-ingest | Car Scanner `.brc` recordings and WiCAN `.jsonl.gz` batches in copyparty's `/car` → VictoriaMetrics, every 15 min (timer) | n/a |
 | .50 | finance_exporter | built from babraham123/finance-exporter | Market prices, FRED rates and Treasury yields for VictoriaMetrics | n/a |
 
 - `nginx` serves `/var/opt/nginx/www` by subdomain (`www/`, `wifi/` (redirects to the AP's admin
@@ -61,8 +64,10 @@ Container catalog, host services, observability and backups. Hostnames use the p
 - The content isn't in this repo, e.g. [homesite](https://github.com/babraham123/homesite) deploys
   with its own `tools/deploy_src.sh`; this repo owns the nginx config and quadlet
 
-linkding, Readeck, Calliope and Storyteller form one pipeline, joined by two host
-timers; see the [reading guide](guides/reading.md).
+linkding, Readeck, Calliope, yt_to_audiobook and Storyteller form one pipeline, joined by
+host timers and path units; see the [reading guide](guides/reading.md). The calliope and
+yt_to_audiobook images carry their own batch runners (`/opt/*_batch.py`, from each repo's
+`batch/`), which their quadlets run: one book or video from the inbox per run.
 
 ## homesvcs: home automation (pve1, 10.12.0.0/24)
 
@@ -73,7 +78,7 @@ timers; see the [reading guide](guides/reading.md).
 | .8 | mosquitto | eclipse-mosquitto | MQTT broker | mqtt (internal DNS only) |
 | .9 | zigbee2mqtt | zigbee2mqtt | Zigbee ↔ MQTT bridge | zigbee.janedoe.com |
 | .11 | home_assistant | home-assistant | Home automation hub | home.janedoe.com |
-| .20 | fluentbit | fluent-bit:3.2 | Journal → VictoriaLogs forwarder | n/a |
+| .20 | fluentbit | fluent-bit:5.1 | Journal → VictoriaLogs forwarder | n/a |
 | .23 | crowdsec_appsec | crowdsec | WAF for the node's Traefik ([Security](security.md#the-edge-haproxy)) | n/a |
 
 ## vpnsvcs: public edge (Linode, 10.13.0.0/24)
@@ -82,27 +87,30 @@ timers; see the [reading guide](guides/reading.md).
 | ----- | --------- | ------- | --------- | ----- |
 | .7 | vmagent | vmagent | Local metrics scraper | n/a |
 | .20 | fluentbit | fluent-bit | Journal → VictoriaLogs forwarder | n/a |
-| .30 | geoip_generator | built from `src/services/geoip_generator/` | Weekly GeoIP maps for HAProxy (timer) | n/a |
+| .30 | geoip_generator | built from babraham123/haproxy-mapper | Weekly GeoIP maps for HAProxy (timer) | n/a |
 
 ## Host-level services (not containerized)
 
 | Host | Service | Purpose |
 | ------ | --------- | --------- |
 | container VMs | mdns_repeater | Bridge mDNS between VM NIC and Podman network |
+| container VMs, vpnsvcs | image_updater (timer) | Nightly image updates behind a Trivy scan ([podman-image-updater](https://github.com/babraham123/podman-image-updater), [Maintenance](maintenance.md#container-images)) |
 | container VMs, vpnsvcs, pve1, pve2 | node_exporter | Host metrics |
-| websvcs, devtop, gaming | nvidia_gpu_exporter | GPU metrics (temperature) for the cards pve2 passes through |
+| websvcs, devtop, gaming | nvidia_gpu_exporter | GPU temperature, power, clocks for the cards pve2 passes through; "GPUs" dashboard |
 | pve1, pve2 | vm_watchdog | VM health watchdog |
 | pve1 | cert_notifier (timer) | Email warnings before cert expiry (msmtp) |
 | pve1 | ct_watch (timer) | Daily ctlogs.dev check for certs the homelab didn't request ([Security](security.md#tls-and-trust-hierarchy)) |
+| secsvcs | net_probe (timer) | Hourly pings, speed tests and iperf3 across the network ([net-probe](https://github.com/babraham123/net-probe), pinned by release tag and sha256; [Networking](networking.md#throughput-monitoring)); "Network" dashboard |
+| websvcs, vpnsvcs | iperf3_server | iperf3 target for net_probe, `:5201`, secsvcs only |
 | pve1 | backup_orchestrator (timer) | Weekly backup run ([Storage and backups](#storage-and-backups)) |
-| websvcs | snapraid sync/scrub (timers), smartmontools | Media array parity and disk health |
+| websvcs | snapraid sync/scrub (timers), smartmontools, smartctl_exporter | Media array parity and disk health; "Disks" dashboard |
 | vpnsvcs | haproxy | Public ingress ([Networking](networking.md#ingress-the-three-tier-chain)) |
 | vpnsvcs | headscale, tailscaled | Mesh VPN coordinator + client |
 | vpnsvcs | crowdsec-firewall-bouncer | Drops CrowdSec's banned IPs in nftables ([Security](security.md#the-edge-haproxy)) |
 | vpnsvcs | fail2ban | SSH brute-force bans ([Security](security.md#vps-hardening)) |
 | vpnsvcs | deadman (timer) | Watches the alerting path from outside ([Observability](#observability)) |
 | websvcs | calliope (path + timer) | Starts the Calliope job while its inbox has EPUBs |
-| websvcs | car_ingest (timer) | Car Scanner `.brc` recordings in copyparty's `/car` → VictoriaMetrics, every 15 min |
+| websvcs | yt_to_audiobook (path + timer) | Starts the yt_to_audiobook job while its inbox has requests |
 | router | Unbound, mDNS-Bridge, ntopng, Telegraf | DNS, discovery, traffic + metrics |
 
 pve1, pve2, pbs2 and the router serve their own web UIs as pve1/pve2/pbs2/router.janedoe.com:
@@ -206,7 +214,11 @@ flowchart LR
     `HighLoad`, `HighCpuTemp`, `SystemdUnitFailed` for any "Homelab:" unit, `ClockSkew`),
     `TargetDown`, `AuthFailureBurst` (Authelia), and the Gatus-fed `EndpointDown`,
     `CertExpiringSoon` (14 days), `CertExpiringCritical` (3 days)
-  - `backups.yml`: `BackupStale`, `BackupNeverRan`, `SnapraidStale`, `DiskUnhealthy`
+  - `backups.yml`: `BackupStale`, `BackupNeverRan`, `SnapraidStale`
+  - `hardware.yml`: GPUs (`GpuHot`, `GpuThermalThrottling`, `GpuRecoveryNeeded`) and the media
+    array's SMART (`DiskUnhealthy`, `DiskHot`, `DiskSectorsGrowing`, `DiskCrcErrors`)
+  - `network.yml`: `WanSlow` (three speed tests under half the plan), `VpsPathDown`,
+    `NetProbeStale`, `NetProbeAbsent`
   - `vps.yml`: `VpsMetricsAbsent`, `HaproxyDown`, `HaproxyBackendConnectErrors`
   - `crowdsec.yml`: `CrowdsecDown`, `CrowdsecBouncerStale` (no pull in 10 minutes),
     `CrowdsecAppsecDown` (a node's WAF), `CrowdsecNotParsing` (no Traefik line parsed in an hour)
@@ -237,7 +249,7 @@ flowchart LR
 
 ## Storage and backups
 
-- **Container state**: named Podman volumes (`postgresdb`, `grafanadata`, `vmdata`, `vldata`,
+- **Container state**: named Podman volumes (`postgres18`, `grafanadata`, `vmdata`, `vldata`,
   `ntfydb`, `vaultwardendata`, `hassdb`, `hassconfig`, `mqttdata`, `z2mdb`, …), `/etc/opt` and
   `/var/opt`
 - **VM disks**: LVM-thin on each host's NVMe, ext4 guests; no ZFS or RAID, backups over redundancy

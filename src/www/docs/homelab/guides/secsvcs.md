@@ -32,11 +32,10 @@ src/nodes/secsvcs/install_svcs.sh crowdsec
 src/nodes/secsvcs/install_svcs.sh crowdsec_appsec
 src/nodes/secsvcs/install_svcs.sh fluentbit
 
-systemctl restart node_exporter
 systemctl restart mdns_repeater
 systemctl list-units | grep Homelab
 # Expect every image unchanged
-src/base/podman/image_updater.py --dry-run
+image_updater --dry-run
 ```
 
 ## Networking
@@ -70,9 +69,9 @@ journalctl -eu authelia
   - Add regular users, not in `lldap_password_manager` (it can reset others' passwords)
     - jane
     - jane, jayden, jasper
-  - Create the `authelia_gen_access`, `headscale_access`, `command_general` and
-    `vaultwarden_access` groups, add users to them
-  - Create the `telemetry` group (metrics, logs, alert and ntfy UIs), add your user to it
+  - Create the `authelia_gen_access`, `headscale_access`, `command_general` and `ntfy_access`
+    groups, add users to them
+  - Create the `telemetry_access` group (metrics, logs and alert UIs), add your user to it
   - Create the `grafana_admin`, `hass_admin`, `command_admin` and `files_admin` groups, add your
     user to them
   - Restore the authelia middleware
@@ -179,12 +178,12 @@ curl -s -o /dev/null -w '%{http_code}\n' 'https://www.janedoe.com/?q=<script>ale
 
 ## Vaultwarden
 
-<https://vault.janedoe.com>: SSO-only, gated on the `vaultwarden_access` LLDAP group
+<https://vault.janedoe.com>: SSO-only; any Authelia user can sign in
 
 - Prerequisites:
   - On pve1, add `vaultwarden_*` to `/root/secrets/secsvcs.yaml` (recipes in the template), then
     `sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh secsvcs`
-  - Keep the plaintext admin token in the escrow bundle; SOPS holds only its hash
+  - Keep the plaintext admin token in the escrow bundle; the secrets file holds only its hash
   - Set your LLDAP email to `jdoe@gmail.com` (`ORG_CREATION_USERS`)
 - Install. On an existing Postgres cluster, create the database by hand once
 
@@ -215,7 +214,8 @@ curl -fsS https://vault.janedoe.com/alive
 
 - Users, access and tokens come from the config file,
   [ref](https://docs.ntfy.sh/config/#users-via-the-config)
-- Lock down the databases. Remove any user or token not marked `server config`
+- Lock down the databases. Remove any user or token not marked `server config`, except people's
+  accounts (`role: user`, not provisioned), which ntfy-idp-push keeps in step with LLDAP
 
 ```bash
 chmod 600 /var/opt/ntfy/*.db*
@@ -223,6 +223,76 @@ chmod 600 /var/lib/containers/storage/volumes/systemd-ntfydb/_data/*.db*
 podman exec ntfy ntfy access
 podman exec ntfy ntfy token list
 ```
+
+## ntfy-idp-push
+
+<https://idp-push.janedoe.com>: mobile push for Authelia, and each `ntfy_access` member's ntfy
+account, created from LLDAP with a welcome email
+
+- Prerequisites:
+  - On pve1, add `ntfy_idp_push_*` and `duo_*` to `/root/secrets/secsvcs.yaml` (recipes in the
+    template), then `sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh secsvcs`
+  - In LLDAP, create the user `ntfy_idp_push` with that `ntfy_idp_push_ldap_password`, in
+    `lldap_strict_readonly` only
+  - In LLDAP, create the group `ntfy_access`: the shim won't start until it exists
+- Install. ntfy first: the shim refuses to start until ntfy accepts its admin token
+
+```bash
+sudo su
+cd /root/homelab-rendered
+src/nodes/secsvcs/install_svcs.sh ntfy
+src/nodes/secsvcs/install_svcs.sh ntfy_idp_push
+src/nodes/secsvcs/install_svcs.sh traefik
+curl -fsS https://idp-push.janedoe.com/healthz
+podman exec ntfy_idp_push ntfy-idp-push user list
+```
+
+- Accounts: within 15 minutes of joining `ntfy_access`, a person gets an ntfy account and a
+  welcome email. Leaving the group deletes it: its phones are revoked and its ntfy user removed
+- Never empty, rename or delete `ntfy_access`: an empty group deletes every account and phone at
+  the next sync. Only an LDAP error skips a sync
+- Phones: `https://idp-push.janedoe.com/enroll` after an Authelia two-factor login, so the first
+  phone needs another second factor (TOTP or a security key), or a single-use link:
+  `podman exec ntfy_idp_push ntfy-idp-push enroll-link USER`
+- Lost phone: `podman exec ntfy_idp_push ntfy-idp-push device list USER`, then
+  `device revoke DEVICE_ID`
+- Authelia's "Mobile Push" option stays off until Authelia stops pinning Duo's CA (authelia#7647);
+  until then the shim only manages accounts and enrollment
+- Config changes: reinstall, or edit `/etc/opt/ntfy_idp_push/server.yml` and
+  `podman kill -s HUP ntfy_idp_push` for per-request settings
+
+## Network probe
+
+`net_probe.timer` runs hourly: pings to websvcs and the VPS every run; at fixed hours, one at a
+time and only when the path isn't busy, an Ookla speed test (03, 09, 15, 21) and 10-second iperf3
+runs both ways to websvcs (01, 07, 13, 19) and to the VPS (04). Results land in node_exporter's
+textfile collector. The probe is [net-probe](https://github.com/babraham123/net-probe), which
+`install_net_probe` fetches the release pinned in `src/base/debian/install_svcs.sh` and checks
+against its sha256; `src/base/net_probe/config.json.j2` has the targets, slots and busy thresholds.
+
+- Set `isp.down_mbps` and `isp.up_mbps` in `vars.yml` to the plan's advertised speeds, then
+  `tools/deploy_src.sh`
+- The iperf3 servers. On websvcs:
+
+```bash
+ssh autoadmin@websvcs install_iperf3_server
+ssh -t manualadmin@websvcs sudo ufw allow in from 192.168.4.20 to any port 5201 proto tcp
+```
+
+- On the VPS: `ssh autoadmin@vpnsvcs install_iperf3_server`, the 5201 rule from
+  `src/nodes/vpnsvcs/install_firewall.sh` (`ufw allow in on tailscale0 from 192.168.4.20 to any
+  port 5201 proto tcp`), and the reloaded [ACL policy](./vpnsvcs.md#acl-policy), which lets
+  secsvcs reach it
+- Then on secsvcs:
+
+```bash
+ssh autoadmin@secsvcs install_net_probe
+ssh -t manualadmin@secsvcs sudo systemctl start net_probe   # every test is due on the first run
+journalctl -u net_probe --no-pager -n 20
+grep -v '^#' /var/lib/node_exporter/textfile_collector/homelab_net_probe.prom
+```
+
+- Monitor: Grafana "Network" dashboard, alerts in `src/services/vmalert/configs/network.yml`
 
 ## Debugging (optional)
 

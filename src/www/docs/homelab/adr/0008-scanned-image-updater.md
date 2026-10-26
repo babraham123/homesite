@@ -16,16 +16,18 @@ noticed when a service broke.
   `AutoUpdate=local`. The upstream ref lives in the node inventory (`upstream:`, `build:`,
   `update_last:`), and the render fails if a quadlet's `Image=` doesn't match it. Nothing in a
   quadlet can pull, so an unscanned image can't reach a container.
-- Each node that runs quadlets (vpnsvcs, homesvcs, websvcs, secsvcs) runs
-  `src/base/podman/image_updater.py` on its own timer, 30 minutes apart, the notification path on
-  secsvcs last. For each image in update order (install order, `update_last` entries at the end):
+- Each node that runs quadlets (vpnsvcs, homesvcs, websvcs, secsvcs) runs the image updater
+  ([podman-image-updater](https://github.com/babraham123/podman-image-updater), installed pinned
+  to a release tag and its hash, with its image list rendered from the node inventory into
+  `src/base/podman/image_updater.json`) on its own timer, 30 minutes apart, the notification path
+  on secsvcs last. For each image in update order (install order, `update_last` entries at the end):
   compare the upstream digest with the one handled last (remote against remote), download it by
   digest, scan it with Trivy, tag the current image `:rollback`, load the new one, and run
   `podman auto-update`. A container whose update fails is pointed back at `:rollback` and that
   digest isn't retried until upstream moves.
 - The scan gate blocks on fixable HIGH or CRITICAL findings only (`--ignore-unfixed`); the old image
   keeps running. Two overrides, both needing a person: a `.trivyignore` entry in git with an `exp:`
-  date and a reason, or `accept` run through sudo by manualadmin on the node, which passes one exact
+  date and a reason, or `accept` run as root on the node, which passes one exact
   digest, or one exact set of `build.sh` inputs for a built image. Neither is reachable through
   autoadmin, the dispatcher or OliveTin.
 - Installing a service goes through the same gate: `install_svcs.sh` loads the service's images

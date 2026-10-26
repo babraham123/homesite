@@ -172,6 +172,30 @@ lspci -nnv | grep TPU
   [ref2](https://forum.proxmox.com/threads/guest-internal-error-when-passing-through-pcie.99239/),
   [ref3](https://www.derekseaman.com/2023/06/home-assistant-frigate-vm-on-proxmox-with-pcie-coral-tpu.html)
 
+### SATA Adapter (PCIe)
+
+- Find the vendor:device id, skip the onboard controller
+  - `lspci -nn | grep SATA`
+- Bind it to vfio before ahci `sudo vim /etc/modprobe.d/sata-passthrough.conf`
+
+```text
+options vfio-pci ids=VENDOR:DEVICE
+softdep ahci pre: vfio-pci
+```
+  
+```bash
+sudo update-initramfs -u -k all
+sudo reboot
+# double check the kernel driver
+lspci -k  | grep -A3 SATA
+```
+
+- In the PVE UI, Go to VM >> Hardware >> Add PCI device
+  - Check Raw Device, ROM-Bar, PCI-Express
+- Reboot the VM
+- ssh into the VM and list the disks. Record them in `vars.yml`
+  - `ls -l /dev/disk/by-id/ata-*`
+
 ## USB Passthrough
 
 Pass thru physical port, [docs](https://pve.proxmox.com/wiki/USB_Physical_Port_Mapping)
@@ -255,17 +279,20 @@ ufw allow in from any to any port 8007 proto tcp
   - Datastore >> backup1
     - Prune & GC tab: leave empty, `prune.sh` sets both
     - Content tab >> Add Namespace under Root: `pve1`, `pve2`, `files`
-- Create a backup token per PVE host: write and read its own namespaces, no delete
+- Create a backup token per PVE host: write and read its own namespaces, no delete. A token
+  never gets more than its user, so the user holds the same grants; it has no password
   - pve1: store the secret (shown once) as `pbs2_backup_token` in `/root/secrets/pve1.yaml`
   - pve2: the token goes straight into its storage entry (below); regenerate it here if lost
 
 ```bash
 proxmox-backup-manager user create pve1@pbs
 proxmox-backup-manager user generate-token pve1@pbs backup
-proxmox-backup-manager acl update /datastore/backup1/pve1 DatastoreBackup --auth-id 'pve1@pbs!backup'
-proxmox-backup-manager acl update /datastore/backup1/files DatastoreBackup --auth-id 'pve1@pbs!backup'
+for id in pve1@pbs 'pve1@pbs!backup'; do
+  proxmox-backup-manager acl update /datastore/backup1/pve1 DatastoreBackup --auth-id "$id"
+  proxmox-backup-manager acl update /datastore/backup1/files DatastoreBackup --auth-id "$id"
+done
 proxmox-backup-manager user create pve2@pbs
-proxmox-backup-manager acl update /datastore/backup1/pve2 DatastoreBackup --auth-id 'pve2@pbs!backup'
+proxmox-backup-manager acl update /datastore/backup1/pve2 DatastoreBackup --auth-id pve2@pbs
 ```
 
 - On pve1, create the client encryption key. Escrow it: nothing restores without it
@@ -282,13 +309,16 @@ chmod 400 /root/secrets/pbs_client.key
 proxmox-backup-manager cert info | grep Fingerprint
 # pve1: the token, the key, namespace pve1
 pvesm add pbs pbs2 --server pbs2.janedoe.com --datastore backup1 --namespace pve1 \
-  --username 'pve1@pbs!backup' --password "$(sops -d /root/secrets/pve1.yaml | yq .pbs2_backup_token)" \
+  --username 'pve1@pbs!backup' --password "$(age -d -i /root/secrets/age.txt /root/secrets/pve1.yaml.age | yq .pbs2_backup_token)" \
   --fingerprint 'FINGERPRINT' --encryption-key /root/secrets/pbs_client.key --content backup
 # pve2: its own token, namespace pve2, the same key copied from pve1
+proxmox-backup-manager user generate-token pve2@pbs backup   # copy the value, shown once
+read -rsp 'token: ' token; echo
+proxmox-backup-manager acl update /datastore/backup1/pve2 DatastoreBackup --auth-id 'pve2@pbs!backup'
 pvesm add pbs pbs2 --server pbs2.janedoe.com --datastore backup1 --namespace pve2 \
-  --username 'pve2@pbs!backup' \
-  --password "$(proxmox-backup-manager user generate-token pve2@pbs backup --output-format json | jq -r .value)" \
+  --username 'pve2@pbs!backup' --password "$token" \
   --fingerprint 'FINGERPRINT' --encryption-key /root/secrets/pbs_client.key --content backup
+unset token
 pvesm status
 ```
 
@@ -326,7 +356,7 @@ ufw allow in from 192.168.4.20 to any port 9100 proto tcp
 ```bash
 ssh manualadmin@pve1
 sudo su
-sops /root/secrets/pve1.yaml
+/root/homelab-rendered/src/nodes/pve1/secret_update.sh pve1
 ```
 
 After pve1, secsvcs and victoriametrics are set up, for pve1, pve2 and pbs2.

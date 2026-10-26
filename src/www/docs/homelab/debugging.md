@@ -176,8 +176,8 @@ Named volumes are prefixed with `systemd-` by quadlet.
 
 ```bash
 podman volume ls
-podman volume inspect --format '{{ .Mountpoint }}' systemd-postgresdb
-# e.g. /var/lib/containers/storage/volumes/systemd-postgresdb/_data
+podman volume inspect --format '{{ .Mountpoint }}' systemd-postgres18
+# e.g. /var/lib/containers/storage/volumes/systemd-postgres18/_data
 du -sh "$(podman volume inspect --format '{{ .Mountpoint }}' systemd-vmdata)"
 ```
 
@@ -188,7 +188,7 @@ du -sh "$(podman volume inspect --format '{{ .Mountpoint }}' systemd-vmdata)"
 /root/homelab-rendered/src/nodes/pve1/lookup_docker_tag.sh homeassistant/home-assistant stable
 
 # What the image updater would load, with scan results
-/root/homelab-rendered/src/base/podman/image_updater.py --dry-run
+image_updater --dry-run
 # The digest each container's image was last updated to, and how it went
 head /var/lib/image_updater/state/*
 podman images --filter reference='localhost/*'
@@ -222,10 +222,10 @@ podman secret ls
 age -d -i /etc/opt/secrets/id_ed25519 /etc/opt/secrets/secrets.yaml.age | yq ".SECRET_NAME"
 ```
 
-On pve1 the source files are SOPS-encrypted:
+On pve1, every host's file, encrypted to pve1's key too:
 
 ```bash
-sops -d /root/secrets/HOST.yaml | yq ".SECRET_NAME"
+age -d -i /root/secrets/age.txt /root/secrets/HOST.yaml.age | yq ".SECRET_NAME"
 ```
 
 Use `head -c -1` to strip the trailing newline when piping a secret into a file or another command.
@@ -310,7 +310,7 @@ images, and volumes, so back up volume data first.
 
 ```bash
 podman network reload systemd-net   # try this first
-cp -R /var/lib/containers/storage/volumes/systemd-postgresdb/_data /root/pgbackup
+cp -R /var/lib/containers/storage/volumes/systemd-postgres18/_data /root/pgbackup
 podman system reset
 ```
 
@@ -439,7 +439,9 @@ echo "show stat" | socat stdio /run/haproxy/admin.sock | cut -d, -f1,2,18
 echo "show table" | socat stdio /run/haproxy/admin.sock   # rate-limit / ban tables
 ```
 
-HAProxy routes on SNI without terminating TLS. To see what SNI a client actually sends, capture
+HAProxy routes on SNI without terminating TLS. Each :443 connection logs one line when it closes,
+ending in `up=<bytes> down=<bytes> sni=<name>` (`journalctl -u haproxy | grep sni=`); an SNI with
+characters outside `[a-z0-9.-]` logs as `-`. To see exactly what SNI a client sends, capture
 ClientHello packets and open the file in Wireshark:
 
 ```bash
@@ -645,7 +647,7 @@ the data.
 
 ```bash
 systemctl stop postgres
-podman volume rm systemd-postgresdb
+podman volume rm systemd-postgres18
 systemctl start postgres
 ```
 

@@ -36,13 +36,15 @@
     executable, since `install` defaults to 755; a directory tree, like Traefik's `plugins-local/`,
     is removed and copied again with `cp -r`), then ends with `reload_restart <unit>` if it installs
     a unit. Runs from `/root/homelab-rendered/src`, so its paths start with `base/`, `nodes/` or
-    `services/`. Before the case, `src/base/podman/image_updater.py install SERVICE` loads the
-    service's images and passes them through the scan gate, or stops the install
+    `services/`. Before the case, `/usr/local/bin/image_updater install SERVICE` (the [image
+    updater](https://github.com/babraham123/podman-image-updater), with the image list in
+    `src/base/podman/image_updater.json.j2`) loads the service's images and passes them through
+    the scan gate, or stops the install
   - `inventory.yml`: the node's part of the node inventory (keys documented in `src/nodes.jinja`)
   - `commands.sh` - Other tasks that run as root and are triggered remotely
   - `traefik/`: the node's reverse proxy routing rules (HTTP routers, middlewares); the config
     shared by every node is `src/services/traefik/`
-  - `secrets_template.yaml`: template for SOPS-encrypted secrets
+  - `secrets_template.yaml`: template for the node's AGE-encrypted secrets
 - `src/services/<service>/`, one per service. May contain:
   - `*.container`: Podman quadlet systemd unit files
   - `*.volume`: Podman volume definitions
@@ -58,9 +60,10 @@
 
 - Every script that runs on a Debian or PVE node sources `src/base/lib.sh` first:
   `set -euo pipefail`, `log`/`warn`/`die`, `require_root`, `require_reachable`/`wait_reachable`,
-  `install_quadlet`, `reload_restart`. Scripts run in place source it relative to themselves; copies
-  installed to `/usr/local/bin` with `install_bin` (and the dispatcher) source
-  `/usr/local/lib/homelab/lib.sh`, which `install_lib` puts there
+  `install_quadlet`, `reload_restart`, `fetch_pinned` (a download checked against a pinned
+  sha256). Scripts run in place source it relative to themselves; copies installed to
+  `/usr/local/bin` with `install_bin` (and the dispatcher) source `/usr/local/lib/homelab/lib.sh`,
+  which `install_lib` puts there
 - The container VMs' `install_svcs.sh` also source `src/base/podman/svcs_lib.sh`:
   `install_traefik_config NODE` and `install_fluentbit_config [CONFIG]`, the config steps every
   Traefik and Fluent Bit case shares. The case still installs the quadlet and restarts the unit
@@ -100,7 +103,7 @@ flowchart TB
 
     subgraph node["On the node"]
         dispatch["install_&lt;svc&gt; → dispatcher.sh allowlist<br/>→ install_svcs.sh → quadlets into<br/>/etc/containers/systemd"]
-        second["Container ExecStartPre: render_secrets.sh<br/>renders remaining *.j2 with SOPS/AGE secrets<br/>(render_host.sh already ran at install)"]
+        second["Container ExecStartPre: render_secrets.sh<br/>renders remaining *.j2 with AGE secrets<br/>(render_host.sh already ran at install)"]
     end
 
     vars --> allvars
@@ -212,7 +215,7 @@ tests/run.sh --fast   # skips the full render, about 3 s
 
 `tests/run.sh` runs every `test_*` function in `tests/*_test.sh`, each in its own subshell from the
 repo root, in parallel; helpers shared by the suites are in `tests/lib.sh`. Plain bash, plus
-`python3` for the parser the car suite tests.
+`python3` where a suite drives a Python script.
 
 - `check_rendered_test.sh`: `tools/check_rendered.py` on `tests/fixtures/tree`, a minimal rendered
   tree in the repo's layout (`src/nodes/<node>/inventory.yml` and all) that passes; each test breaks
@@ -220,8 +223,8 @@ repo root, in parallel; helpers shared by the suites are in `tests/lib.sh`. Plai
 - `nodes_jinja_test.sh`: the dispatcher cases, sudoers grants, OliveTin buttons, subdomains, uptime
   endpoints and image update order `src/nodes.jinja` derives from `tests/fixtures/nodes/`, written
   out from ADR 0006.
-- `car_ingest_test.sh`: `src/nodes/websvcs/car_ingest.py.j2` on synthetic Car Scanner `.brc`
-  recordings: the conversion, and a run's import-once, `failed/`, `too_old` and retry handling.
+- `image_updater_test.sh`: the image updater's config, `src/base/podman/image_updater.json.j2`,
+  from a fixture inventory.
 - `render_test.sh`: a full render of `vars.template.yml` passes every check (skipped by `--fast`,
   since the pre-commit hook renders anyway).
 

@@ -230,6 +230,9 @@ tailscale ping --tsmp other_node
 ```
 
 - For an Apple TV, use the Tailscale app. [Ref](https://tailscale.com/kb/1280/appletv)
+  - It gets its own user, so its grants live in `tailscale_extra_acls`: `headscale users create
+    appletv`, then register the code the app shows with
+    `headscale nodes register --user appletv --key KEY`
 
 - For Debian ([src](https://tailscale.com/kb/1626/install-debian-trixie))
 
@@ -292,10 +295,9 @@ ufw allow in on $POD_IFACE from 10.13.0.7 to any port 8405,9090 proto tcp
 ufw allow in on $POD_IFACE from 10.13.0.0/24 to any port 53 proto udp
 ufw route allow in on $POD_IFACE out on tailscale0 to 192.168.4.20 port 443 proto tcp
 ufw route allow in on $POD_IFACE out on tailscale0 to 100.100.100.100 port 80 proto tcp
-# HAProxy and Headscale re-bind on the gateway
+# HAProxy and Headscale re-bind on the gateway; Headscale keeps its OIDC config and policy
 src/nodes/vpnsvcs/install_svcs.sh haproxy
-cp src/services/headscale/headscale_private.yaml /etc/headscale/config.yaml
-systemctl restart headscale
+src/nodes/vpnsvcs/install_svcs.sh headscale
 ```
 
 - On pve1: `sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh vpnsvcs`
@@ -345,7 +347,7 @@ ls /etc/haproxy/countries | wc -l  # about 250 maps
 
 ```bash
 sudo su
-# From pve1: sops -d /root/secrets/secsvcs.yaml | yq .crowdsec_bouncer_vpnsvcs
+# From pve1: age -d -i /root/secrets/age.txt /root/secrets/secsvcs.yaml.age | yq .crowdsec_bouncer_vpnsvcs
 vim /etc/opt/secrets/crowdsec_bouncer_key
 chmod 600 /etc/opt/secrets/*
 ```
@@ -386,9 +388,9 @@ journalctl -u crowdsec-firewall-bouncer --no-pager | tail   # no TLS or 403 erro
 
 ```bash
 sudo su
-# From pve1: sops -d /root/secrets/secsvcs.yaml | yq .alertmanager_admin_password
+# From pve1: age -d -i /root/secrets/age.txt /root/secrets/secsvcs.yaml.age | yq .alertmanager_admin_password
 vim /etc/opt/secrets/alertmanager_admin_password
-# From pve1: sops -d /root/secrets/pve1.yaml | yq .msmtp_password
+# From pve1: age -d -i /root/secrets/age.txt /root/secrets/pve1.yaml.age | yq .msmtp_password
 vim /etc/opt/secrets/msmtp_password
 # A long random topic name; subscribe to https://ntfy.sh/<topic> in the phone's ntfy app
 LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 | tee /etc/opt/secrets/deadman_ntfy_topic; echo

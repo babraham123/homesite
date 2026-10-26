@@ -36,8 +36,15 @@ sudo reboot
 systemctl list-units --state=failed
 ```
 
-- Headscale is a GitHub release, not an apt package: `sudo
-  /root/homelab-rendered/src/nodes/vpnsvcs/install_svcs.sh headscale` installs the latest
+- Headscale is a GitHub release, not an apt package, pinned by version and sha256 in the
+  `headscale` case of `src/nodes/vpnsvcs/install_svcs.sh.j2` (the sha256 is the deb's line in
+  the release's `checksums.txt`): set both, deploy, then `sudo
+  /root/homelab-rendered/src/nodes/vpnsvcs/install_svcs.sh headscale`
+- mdns-repeater is pinned the same way, by commit, in the `mdns_repeater` case of
+  `src/base/debian/install_svcs.sh`
+- net_probe and Ookla's speedtest CLI are pinned by URL and sha256 in the `net_probe` case of
+  `src/base/debian/install_svcs.sh`: set both to the new release or version, deploy, then
+  `ssh autoadmin@secsvcs install_net_probe`
 - PVE and PBS point releases: pve2 (PBS is local) then pve1, per the [Proxmox
   guide](guides/proxmox.md#minor-version), which also has the major-version path
 - Container images update themselves nightly; see [Container images](#container-images)
@@ -60,10 +67,10 @@ sudo /root/homelab-rendered/src/nodes/vpnsvcs/install_svcs.sh headscale
 | Group | Grants |
 | --- | --- |
 | `authelia_gen_access` | Every Authelia-protected subdomain; Readeck user |
+| `ntfy_access` | An ntfy account, from a welcome email; leaving deletes it. Never empty it: that deletes everyone's |
 | `headscale_access` | VPN sign-in |
 | `command_general` | OliveTin's general commands |
-| `telemetry` | VictoriaMetrics, VictoriaLogs, Alertmanager and ntfy UIs |
-| `vaultwarden_access` | Vaultwarden sign-in |
+| `telemetry_access` | VictoriaMetrics, VictoriaLogs and Alertmanager UIs |
 | `grafana_admin`, `hass_admin`, `command_admin`, `guacamole_admin`, `readeck_admin`, `storyteller_admin` | Admin in that app; admins only |
 
 - Their first sign-in, at https://auth.SITE_URL: register a TOTP app or a security key. Away from
@@ -75,6 +82,9 @@ sudo /root/homelab-rendered/src/nodes/vpnsvcs/install_svcs.sh headscale
   - Guacamole: signs in with no connections. Then grant them under Settings >> Users >> USER
   - Storyteller: permissions are set at first sign-in, so set the groups before it
   - Vaultwarden: sets their master password; only then can an organization owner add them
+- ntfy: within 15 minutes of joining `ntfy_access` they get a welcome email with their ntfy
+  login. To enroll their phone for mobile push, they open https://idp-push.SITE_URL/enroll after
+  signing in with TOTP or a security key
 
 ## Update secrets
 
@@ -124,7 +134,8 @@ sudo /root/homelab-rendered/src/nodes/pve1/certificates/ssh_cert_gen_windows.sh
 
 `image_updater.timer` updates every image on vpnsvcs (20:00), homesvcs (20:30), websvcs (21:00)
 and secsvcs (21:30) each night, behind a Trivy scan: a fixable HIGH or CRITICAL CVE blocks the new
-image, and the old one keeps running. Design: [ADR 0008](adr/0008-scanned-image-updater.md).
+image, and the old one keeps running. Design: [ADR 0008](adr/0008-scanned-image-updater.md); the
+script: [podman-image-updater](https://github.com/babraham123/podman-image-updater).
 
 | ntfy `alert` topic | Priority |
 | --- | --- |
@@ -138,32 +149,35 @@ image, and the old one keeps running. Design: [ADR 0008](adr/0008-scanned-image-
 ssh manualadmin@NODE
 sudo journalctl -u image_updater
 # What would change, with scan results; loads and restarts nothing
-sudo /root/homelab-rendered/src/base/podman/image_updater.py --dry-run
+sudo image_updater --dry-run
 # A run now
 sudo systemctl start image_updater
 ```
 
 - Override a blocked image, after reading its findings. Either:
-  - every digest until a date: add the CVE to `src/services/<service>/.trivyignore` with the
-    reason, then deploy
+  - every digest until a date: add the CVE to `.trivyignore` in the service's dir (its first
+    `dirs` entry in the inventory, default `src/services/<service>/`) with the reason, then
+    deploy
 
     ```text
     # Not reachable: the vulnerable parser only reads files from the image itself
     CVE-2026-12345 exp:2026-12-31
     ```
 
-  - that digest only: on the node, as manualadmin (never through the dispatcher or OliveTin),
-    `sudo /root/homelab-rendered/src/base/podman/image_updater.py accept CONTAINER`. It rescans,
-    prints the findings, records the digest and notifies; the next run loads it. For a built image
-    it builds and scans instead, and records the `build.sh` inputs, so the next run's build of the
-    same inputs passes.
-- Built images: every one has a `src/services/<service>/build.sh` (`versions`, `build TAG`), and
-  is rebuilt through the scan gate when any input it reports changes, like `geoip_generator`'s base
-  image digests, haproxy-mapper commit and own files. The render fails for a `build:` image
-  without one.
+  - that digest only: on the node as root (never through the dispatcher or OliveTin),
+    `sudo image_updater accept CONTAINER`. It rescans, prints the findings, records the digest and
+    notifies; the next run loads it. For a built image it builds and scans instead, and records the
+    `build.sh` inputs, so the next run's build of the same inputs passes.
+- Built images: every one has a `build.sh` (`versions`, `build TAG`) in its service's dir, and
+  is rebuilt through the scan gate when any input it reports changes, like `geoip_generator`'s
+  haproxy-mapper commit and base image digests. The render fails for a `build:` image without one.
 - Roll back by hand: `podman tag localhost/NAME:rollback localhost/NAME:TAG`, then
   `systemctl restart CONTAINER`. The updater doesn't retry that digest; it moves on when upstream
   does.
+- Update the updater itself: set `tag` and `sha` (the sha256 in that release's notes, or its
+  `image_updater.sha256` asset) in the `image_updater` case of `src/base/debian/install_svcs.sh`,
+  deploy, then run `install_image_updater` on each node. A deploy alone only changes its image
+  list.
 
 ## Alerting pipeline test
 
