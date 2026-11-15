@@ -2,10 +2,7 @@
 <!-- ref: https://github.com/squidfunk/mkdocs-material/issues/1466 -->
 {% if page.meta.comments %}
   <h2 id="__comments">{{ lang.t("meta.comments") }}</h2>
-  <!-- Insert generated snippet here -->
-  <script data-isso="/homesite/"
-    data-isso-css="true"
-    data-isso-css-url="{api-endpoint}/css/isso.css"
+  <script data-isso-css="true"
     data-isso-lang="en"
     data-isso-max-comments-top="10"
     data-isso-max-comments-nested="5"
@@ -18,13 +15,15 @@
     data-isso-vote-levels="null"
     data-isso-page-author-hashes="null"
     data-isso-reply-notifications-default-enabled="false"
-    data-isso-sorting="oldest"
-    src="https://comment.bket.net/homesite/js/embed.min.js">
+    src="https://comment.bket.net/js/embed.min.js">
   </script>
+  <section id="isso-thread">
+    <noscript>Enable JavaScript to view comments.</noscript>
+  </section>
 
   <!-- Synchronize Isso theme with palette -->
   <!-- <script>
-    var isso = document.querySelector("script[src*=isso]")
+    var isso = document.querySelector("script[src$='/js/embed.min.js']")
 
     // Set palette on initial load
     var palette = __md_get("__palette")
@@ -51,7 +50,7 @@
           var frame = document.querySelector(".isso-frame")
           frame.contentWindow.postMessage(
             { isso: { setConfig: { theme } } },
-            "https://comment.bket.net/homesite"
+            "https://comment.bket.net"
           )
         }
       })
