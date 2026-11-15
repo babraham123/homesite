@@ -1,8 +1,9 @@
 # GitHub repository rules
 
 The homelab and the repos it builds or installs from share one set of GitHub settings. A merge to
-`main` in a container repo reaches every node the next night (the image updater builds `main`),
-and the homelab pins commits of the others, so `main` is treated as the deploy branch.
+`main` in a repo the image updater builds from reaches its node the next night. ntfy-idp-push
+ships on a tagged release, whose image the updater pulls; podman-image-updater and net-probe are
+pinned to release tags and mdns-repeater to a commit. `main` is treated as the deploy branch.
 
 ## Settings
 
@@ -42,14 +43,14 @@ Maven artifacts in bt-courier-android, only when the registry says when it was r
 a PR that only pins the version in use), and pins Actions by digest. Repos with a Containerfile or
 Dockerfile pin its base images by digest too, and all but the homelab turn on
 `osvVulnerabilityAlerts`, which opens fix PRs outside the schedule.
-TTS-Narrated-Ebook-Creator holds the CUDA base at 12.4 and skips torch, torchaudio and
-CTranslate2, whose newer builds drop CUDA 12.4 or Pascal.
+TTS-Narrated-Ebook-Creator holds the CUDA base at 12.6 and skips torch, torchaudio and
+CTranslate2, whose newer builds drop CUDA 12.6 or Pascal.
 
 In the homelab, Renovate updates only the images pinned to a version (`upstream:` in the node
 inventories, the quadlets' `Image=localhost/...` and any other mention under `src/`, `docs/` and
-`rendered/`), plus the tool versions in CI and the pre-commit hook. Floating tags are the image
-updater's job, and pinning their digests would bypass its scan. A new major version waits for
-approval on the Dependency Dashboard, since it usually needs a migration.
+`rendered/`), plus the tool versions in CI and the pre-commit checks (`tools/lib.sh`). Floating
+tags are the image updater's job, and pinning their digests would bypass its scan. A new major
+version waits for approval on the Dependency Dashboard, since it usually needs a migration.
 
 ## Checking a repo
 

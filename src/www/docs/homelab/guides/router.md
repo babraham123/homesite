@@ -35,12 +35,19 @@ iface enp2s0 inet dhcp
 `systemctl restart networking`
 
 - Test connection: `ping 1.1.1.1`
-- Add proxmox repo, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/)
-  - `sudo nano /etc/apt/sources.list.d/pve-enterprise.list`
+- Add proxmox repo, [ref](https://pve.proxmox.com/wiki/Package_Repositories)
 
-```text
-#deb https://enterprise.proxmox.com/debian/pve trixie pve-enterprise
-deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
+```bash
+# As root. PVE 9 lists its repos as deb822 .sources files: turn off the enterprise and Ceph ones
+sed -i '/^Types:/a Enabled: false' /etc/apt/sources.list.d/pve-enterprise.sources \
+  /etc/apt/sources.list.d/ceph.sources
+tee /etc/apt/sources.list.d/proxmox.sources > /dev/null <<'EOF'
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: trixie
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+EOF
 ```
 
 - Install desktop env,
@@ -48,7 +55,6 @@ deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
 
 ```bash
 sudo su
-rm /etc/apt/sources.list.d/ceph.list
 apt update && apt upgrade
 apt install -y xfce4 chromium lightdm sudo ufw
 adduser manualadmin
@@ -87,7 +93,6 @@ systemctl start lightdm
     vfio
     vfio_iommu_type1
     vfio_pci
-    vfio_virqfd
     ```
 
 - Check that the drivers are loaded
@@ -108,9 +113,9 @@ lspci
   [src](https://www.virtualizationhowto.com/2022/08/pfsense-proxmox-install-process-and-configuration/)
   - UFS, GPT
   - Assign Interfaces: WAN=igc0, LAN=igc1, LAN2=igc3, rest as optional
-  - Set LAN Interface IPs
-    - `192.168.1.[100 - 200]/24`
-    - `192.168.3.[100 - 200]/24`
+  - Set LAN Interface IPs; the router is `.1` on every subnet
+    - LAN: `192.168.1.1/24`, DHCP range `192.168.1.100` - `192.168.1.200`
+    - LAN2: `192.168.3.1/24`, DHCP range `192.168.3.100` - `192.168.3.200`
 - Log into pfSense GUI
   - Connect eth1 (LAN) directly to laptop
   - Connect to admin console via LAN ip address (192.168.1.1)
@@ -137,7 +142,7 @@ TODO: integrate these instructions with above
 - Go to Interface >> OPT4
   - Enable, Description = LAN2
   - IPv4 Configuration Type = Static IPv4
-  - IPv4 Address = 192.168.3.0/24
+  - IPv4 Address = 192.168.3.1/24
 - Go to Services >> DHCP Server >> LAN2
   - Enable, Address Pool Range is 192.168.3.100 - 200
 - Go to Firewall >> Rules. Copy existing rules from LAN
@@ -157,6 +162,73 @@ TODO: integrate these instructions with above
 ssh admin@router
 fetch https://raw.githubusercontent.com/Weehooey/pfSense-scripts/refs/heads/main/install-qemu-guest-agent.sh
 sh install-qemu-guest-agent.sh
+```
+
+- Turn off the backup freeze on the VM: the agent can't freeze pfSense's UFS root
+  ("Resource deadlock avoided"), so a snapshot-mode vzdump logs an error and goes on
+  unquiesced either way. pfSense keeps its config in a file it rewrites atomically, so an
+  unquiesced image restores fine.
+
+```bash
+# On pve1 as root, with the router's VMID
+qm set VMID --agent enabled=1,freeze-fs-on-backup=0
+```
+
+### Serial console
+
+pve1 reaches the network only through the router, so when pfSense is down or stuck at a prompt,
+the web UI and its VM console are out of reach too. A serial port gives a pfSense console from
+pve1's local keyboard and monitor. It adds no access: the socket on pve1 is root-only, and root
+there already owns the VM's display and disk.
+
+- Go to System >> Advanced >> Admin Access >> Console Options
+  - Check Serial Terminal
+  - Keep Primary Console on VGA, so the Proxmox console still shows the menu
+- Add the port, then restart the VM
+
+```bash
+# On pve1 as root
+qm shutdown VMID
+qm set VMID -serial0 socket
+qm start VMID
+qm terminal VMID   # Enter for the menu; exit with Ctrl+O
+```
+
+Use it as in [debugging](../debugging.md#serial-console).
+
+### q35 machine type
+
+The VM keeps SeaBIOS; only the machine type changes, and the passed-through NIC ports move to
+PCIe root ports (`pcie=1`, which i440fx lacks). Do it at pve1's local console: if the router
+doesn't come back, the web UI and SSH go with it. Add the [serial port](#serial-console) first
+so `qm terminal` reaches pfSense without the network, and keep a current router image as the
+fallback.
+
+Before, while the network works:
+
+- Go to Interfaces >> Assignments and note which `igcN` is WAN, LAN and LAN2
+- Enable the serial terminal as above
+
+```bash
+# On pve1's local console as root
+qm shutdown VMID
+qm set VMID --machine q35 \
+  --hostpci0 PCI_ADDR,pcie=1 --hostpci1 PCI_ADDR,pcie=1 \
+  --hostpci2 PCI_ADDR,pcie=1 --hostpci3 PCI_ADDR,pcie=1
+qm start VMID
+qm terminal VMID   # watch it boot; the menu must show WAN, LAN and LAN2 on the noted names
+```
+
+From the laptop: internet works and the pve1 web UI loads. If pfSense asks to assign interfaces,
+answer in `qm terminal` with the noted names (no VLANs; WAN, LAN, then LAN2 as an optional
+interface). If it still doesn't come up, roll back and keep the serial port:
+
+```bash
+# On pve1's local console as root
+qm shutdown VMID
+qm set VMID --delete machine \
+  --hostpci0 PCI_ADDR --hostpci1 PCI_ADDR --hostpci2 PCI_ADDR --hostpci3 PCI_ADDR
+qm start VMID
 ```
 
 ### System Patches
@@ -223,9 +295,8 @@ For local-only overrides of existing routes
   rm pfsense-import-certificate.php
   ```
 
-  - Remove the default cert
-    - Go to System >> Certificates >> Certificates
-    - delete `webConfigurator default`
+  - The default cert `webConfigurator default` stays until the first import replaces it in the web
+    GUI ([ACME certificates](./pve1.md#acme-certificates))
 - Setup API access, [Ref](https://github.com/jaredhendrickson13/pfsense-api)
 
 ```bash
@@ -261,7 +332,8 @@ Repeat these steps for each VLAN. This is similar to the "Add an interface" sect
   - Click the new interface (OPT#).
     - Enable, Description = VLAN name
     - IPv4 Configuration Type = Static IPv4
-    - IPv4 Address has the VLAN ID in the 3rd octet (example: 192.168.10.0/24)
+    - IPv4 Address has the VLAN ID in the 3rd octet and ends in `.1` (example:
+      192.168.10.1/24)
 - Go to Services >> DHCP Server >> VLAN name
   - Enable, Address Pool Range is SUBNET.10 - SUBNET.254
 - Trusted only: Go to Services >> mDNS Bridge. Add WiFiTrusted
@@ -278,11 +350,18 @@ Now work on the firewall rules.
   - WiFiIoT, WiFiGuest: Create the following rules
     - Block IPv4+6 TCP WiFiIoT subnets to This Firewall (self) 443
     - Allow IPv4+6 WiFiIoT subnets to WiFiIoT address
+    - WiFiIoT only, the allowlisted services ([networking](../networking.md#vlans)), above the
+      RFC1918 block:
+      - Allow IPv4 TCP WiFiIoT subnets to 192.168.4.21 port 443 (Home Assistant, via
+        homesvcs's Traefik)
+      - Allow IPv4 TCP WiFiIoT subnets to 192.168.4.21 port 8883 (Mosquitto; clients need a
+        cert from the internal CA)
     - Block IPv4 WiFiIoT subnets to RFC1918
     - Block IPv6 WiFiIoT subnets to IPv6Local
     - Move the default allows down here
 
-TODO: configure wired VLANs when I get a proper switch
+TODO: configure wired VLANs when I get a proper switch (planning/camera-webrtc/issues/07);
+WiredIoT gets the WiFiIoT rules, exceptions included
 
 ### WiFi continued
 
@@ -319,6 +398,115 @@ Endpoint-independent mapping (EIM) lets Tailscale peers connect directly.
 - Go to Services >> UPnP IGD & PMP, leave it disabled
 - Verify from a LAN client: `tailscale netcheck` shows `MappingVariesByDestIP: false` and an empty
   `PortMapping`
+
+### Tailscale package patch
+
+`src/nodes/router/tailscale.patch` patches the Tailscale package's runtime files (built on package
+0.1.10, CE 2.9.0; source branch `tailscale-router-0.1.10` of the FreeBSD-ports fork):
+
+- A `SNAT Subnet Routes` checkbox (pfsense/FreeBSD-ports#1462). Unchecked, tailscaled runs with
+  `TS_DEBUG_NETSTACK_SUBNETS=0`, so the kernel forwards tailnet traffic through pf and LAN hosts
+  see the client's 100.x address. `--snat-subnet-routes=false` is passed only on Tailscale ≥ 1.104,
+  the first FreeBSD build that defines it.
+- The auth key stays out of the system log, and is passed only when the node needs to log in.
+- A restart waits for the old tailscaled to exit, so new settings always reach the new one.
+
+A package update overwrites the patched files; System >> Patches then lists the patch as not
+applied. Re-apply it as below.
+
+- Go to System >> Patches >> Add (or edit the existing one)
+  - Description = `Tailscale: SNAT knob, auth key, restart`
+  - Patch Contents: the file, copied raw so its tabs and trailing space survive
+    (`pbcopy < src/nodes/router/tailscale.patch`)
+  - Path Strip Count = 1, Base Directory = `/`, Auto Apply off
+  - Save, Test (must report it can be applied), Apply
+- Go to Firewall >> Rules >> Tailscale, add pass rules, Apply. Kernel-forwarded packets meet pf
+  here; without them they hit the default deny. Set Protocol = Any on both: the form defaults to
+  TCP, which passes web checks but drops UDP (Moonlight's 47998–48000, QUIC, DNS).
+  - Subnet routes: IPv4+IPv6, source `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, destination the
+    advertised subnets
+  - Exit node: IPv4, source `100.64.0.0/10`, destination the `RFC1918` alias with Invert match
+- Check that both rules read `*` in the Protocol column, and that UDP crosses: Moonlight from the
+  tailnet to the gaming VM.
+- Go to Firewall >> NAT >> Outbound, add a rule: WAN, IPv4, protocol any, source `100.64.0.0/10`,
+  translation WAN address, Static Port and EIM off. Exit-node traffic otherwise leaves with its
+  100.x source.
+- Go to VPN >> Tailscale >> Settings, uncheck SNAT Subnet Routes, Save. Check from the shell:
+
+```sh
+grep -c wait_for_tailscaled_exit /usr/local/etc/rc.d/pfsense_tailscaled    # 3
+/usr/local/etc/rc.d/pfsense_tailscaled restart
+procstat -e $(pgrep -x tailscaled) | grep -o 'TS_DEBUG_NETSTACK_SUBNETS=0'
+tailscale debug prefs | grep -i -A2 autoupdate                             # "Apply": false
+grep -E 'Bringing up|Setting runtime|already running|killing it' /var/log/system.log | tail -n 4
+```
+
+- From a phone on mobile data, open the Proxmox UI on pve1: pveproxy's access log shows the phone's
+  100.x address. Browse through the exit node. Both still work after Status >> Filter Reload and a
+  reboot.
+
+### Tailscale from FreeBSD's packages
+
+Netgate's repo lags FreeBSD's `security/tailscale` port (CE 2.9.0 ships 1.98.5). Install FreeBSD's
+package and lock it until Netgate catches up. Run from the LAN, not over the tailnet, with the
+patch above already applied.
+
+- Pause the vm_watchdog (`ssh autoadmin@pve1 pause_vm_watchdog`), back up the pfSense config, and
+  take a disk-only snapshot on pve1 (the passthrough NICs rule out RAM state)
+
+```bash
+# On pve1 as root
+qm list | grep -i router
+qm snapshot VMID pre-tailscale --description "before FreeBSD's tailscale"
+```
+
+- Check that FreeBSD's repo key is on the router; stop if `trusted` is empty
+
+```sh
+# On the router as root
+tailscale version
+pkg config abi
+ls /usr/share/keys/pkg/trusted
+```
+
+- Fetch the package through a throwaway repo config, so pkg checks FreeBSD's signature
+
+```sh
+mkdir -p /root/fbsd-repo /root/fbsd-pkgs
+cat > /root/fbsd-repo/FreeBSD.conf <<'CONF'
+FreeBSD-latest: {
+  url: "pkg+https://pkg.freebsd.org/${ABI}/latest",
+  mirror_type: "srv",
+  signature_type: "fingerprints",
+  fingerprints: "/usr/share/keys/pkg",
+  enabled: yes
+}
+CONF
+export IGNORE_OSVERSION=yes    # FreeBSD's packages are built for an older 16-CURRENT than pfSense's
+pkg -R /root/fbsd-repo update -f
+pkg -R /root/fbsd-repo rquery '%n %v %dn' tailscale    # newest version, no dependencies
+pkg -R /root/fbsd-repo fetch -y -o /root/fbsd-pkgs tailscale
+```
+
+- Install, lock (so a package reinstall or pfSense update can't bring Netgate's back), restart
+
+```sh
+pkg add -f /root/fbsd-pkgs/All/Hashed/tailscale-*.pkg
+pkg lock -y tailscale
+/usr/local/bin/tailscaled --version                # runs; a failure here means an ABI mismatch
+/usr/local/etc/rc.d/pfsense_tailscaled restart
+```
+
+- Verify: the new `tailscale version`; `tailscale up --help 2>&1 | grep -c snat-subnet-routes` is
+  `1`; the "Bringing up" line ends in `--snat-subnet-routes=false`; `tailscale debug prefs` shows
+  `"NoSNAT": true`; `pfctl -s Anchors | grep -ci tailscale` is `0`; then the patch section's checks.
+  In VictoriaLogs, `_time:15m app_name:tailscale` shows the start and
+  `_time:1d app_name:* (tskey OR "auth-key")` returns nothing.
+- Resume the vm_watchdog (`ssh autoadmin@pve1 resume_vm_watchdog`). After a few days, delete the
+  snapshot (`qm delsnapshot VMID pre-tailscale`) and `rm -r /root/fbsd-repo /root/fbsd-pkgs`.
+- Rollback: `pkg unlock -y tailscale`, `pkg install -f -y -r pfSense tailscale`, restart
+  `pfsense_tailscaled`; or `qm rollback VMID pre-tailscale`.
+- Once Netgate's repo reaches the same version, unlock and reinstall from the pfSense repo.
 
 ## PVE1 remaining setup
 
@@ -409,15 +597,28 @@ Service Watchdog:
 - Go to Services >> Service Watchdog
 - Add all of the services present (especially Tailscale and sshd)
 
+### Remote logging
+
+System notices go to VictoriaLogs on secsvcs over UDP syslog; firewall and DNS events stay local,
+being mostly scanner noise and query volume. secsvcs's ufw admits only `192.168.4.1`
+([secsvcs guide](./secsvcs.md#networking)).
+
+- Go to Status >> System Logs >> Settings
+- Log Message Format = syslog (RFC 5424), so timestamps carry the year and the UTC offset
+- Remote Logging Options:
+  - Enable Remote Logging, Source Address = PVE1, IP Protocol = IPv4
+  - Remote log servers = `192.168.4.20:5140`
+  - Remote Syslog Contents: System Events, DHCP Events, General Authentication Events, Gateway
+    Monitor Events, Routing Daemon Events, Network Time Protocol Events. Leave Everything, Firewall
+    Events and DNS Events off; VPN Events covers IPsec and OpenVPN, not Tailscale
+- Check from the laptop: `_time:10m app_name:*` in the logs UI lists pfSense's daemons
+
 ## Updates
 
-- Disable the vm_watchdog in PVE1
+- Pause the vm_watchdog on pve1 for 2 hours, so it can't reset the router mid-upgrade
 
 ```bash
-ssh manualadmin@pve1
-sudo systemctl stop vm_watchdog
-sudo systemctl disable vm_watchdog
-exit
+ssh autoadmin@pve1 pause_vm_watchdog
 ```
 
 - Backup the pfsense VM image
@@ -426,13 +627,12 @@ exit
 - Apply the upgrade and reboot
 - Restore the pfsense config and re-install all pkgs
 - If necessary, manual re-install pkgs
-- re-enable the vm_watchdog
+- Re-apply the [Tailscale package patch](#tailscale-package-patch); check that `tailscale` is
+  still locked (`pkg lock -l`) or reinstall [FreeBSD's](#tailscale-from-freebsds-packages)
+- Resume the vm_watchdog
 
 ```bash
-ssh manualadmin@pve1
-sudo systemctl enable vm_watchdog
-sudo systemctl start vm_watchdog
-exit
+ssh autoadmin@pve1 resume_vm_watchdog
 ```
 
 ## USB Ethernet adapter (optional)

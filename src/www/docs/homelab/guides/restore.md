@@ -31,7 +31,7 @@ ls /root/backups/secsvcs/files/etc/opt/
 export PBS_REPOSITORY='pve1@pbs!backup@pbs2.janedoe.com:backup1'
 export PBS_PASSWORD=$(age -d -i /root/secrets/age.txt /root/secrets/pve1.yaml.age | yq .pbs2_backup_token)
 proxmox-backup-client snapshot list --ns files
-proxmox-backup-client catalog dump host/pve1/2026-10-04T02:00:00Z backups.pxar --ns files \
+proxmox-backup-client catalog dump host/pve1/2026-10-04T02:00:00Z --ns files \
   --keyfile /root/secrets/pbs_client.key | grep secsvcs/dumps
 proxmox-backup-client restore host/pve1/2026-10-04T02:00:00Z backups.pxar /tmp/restore --ns files \
   --keyfile /root/secrets/pbs_client.key --pattern 'secsvcs/dumps/postgres/*'
@@ -48,7 +48,8 @@ proxmox-backup-client restore host/vpnsvcs/2026-10-04T02:00:00Z vpnsvcs.pxar /tm
 - **Postgres**, from `secsvcs/dumps/postgres/pg_dumpall-*.sql.zst`
 
 ```bash
-# On secsvcs, with every other service stopped
+# On secsvcs, with every other service stopped. The dump drops and recreates every database
+# and role; the errors about the postgres role, which psql is connected as, are expected
 zstd -dc pg_dumpall-TIMESTAMP.sql.zst | podman exec -i postgres psql -U postgres
 ```
 
@@ -88,13 +89,14 @@ qm start VMID
 qmrestore pbs2:backup/vm/VMID/TIMESTAMP 999 --storage local-lvm --unique
 qm set 999 --net0 virtio,bridge=vmbr0,link_down=1   # same IP as the original
 qm start 999
-# guestmount -a /dev/pve/vm-999-disk-0 -i --ro /mnt/scratch
+# disk-0 is the EFI disk; the OS disk is scsi0's volume
+# guestmount -a "/dev/pve/$(qm config 999 | sed -n 's/^scsi0: local-lvm:\([^,]*\).*/\1/p')" -i --ro /mnt/scratch
 qm destroy 999 --purge
 ```
 
 - UI: PBS storage >> Backups >> Restore, or File Restore (`pvesm set pbs2 --encryption-key`)
-- devtop and gaming: re-attach `backup=0` data disks with
-  `qm set VMID --scsi1 local-games:vm-VMID-disk-1,backup=0`
+- gaming: the restore keeps the `backup=0` games disk as `unusedN`; re-attach it with
+  `qm set VMID --scsi1 local-lvm:vm-VMID-disk-3,backup=0,discard=on,ssd=1`
 - The router: restore from pve1's disk, works with pve2 off
 
 ```bash
@@ -115,12 +117,14 @@ qmrestore /var/lib/vz/dump/vzdump-qemu-VMID-TIMESTAMP.vma.zst VMID --storage loc
      - Mount the SATA SSD where it was and recreate the datastore entry
      - Copy back `/etc/proxmox-backup` from pve1's `/root/backups/pve2/files/etc/proxmox-backup/`,
        then `systemctl restart proxmox-backup proxmox-backup-proxy`
-  3. Datastore lost:
-     - New `backup1` with namespaces `pve1`, `pve2`, `files`; recreate the `pve1@pbs!backup` token
-       and ACLs ([Proxmox guide](./proxmox.md#backups)); re-point pve1's `pbs2` storage
-     - Rebuild pve2's VMs from their guides and pve1's `/root/backups/websvcs`
+  3. Datastore lost: new `backup1` with namespaces `pve1`, `pve2`, `files`; recreate the
+     `pve1@pbs!backup` token and ACLs ([Proxmox guide](./proxmox.md#backups))
   4. Copy back `/etc/pve/storage.cfg` and `priv/storage/pbs2.*` from
-     `/root/backups/pve2/files/etc/pve/`, then `qmrestore` websvcs, devtop and gaming
+     `/root/backups/pve2/files/etc/pve/`, then:
+     - Datastore intact: `qmrestore` websvcs, devtop and gaming
+     - Datastore lost: re-point pve1's and pve2's `pbs2` storage at the new datastore's
+       fingerprint and token (`pvesm set pbs2`), then rebuild pve2's VMs from their guides and
+       pve1's `/root/backups/websvcs`
   5. `tools/deploy_src.sh`; `install_dispatcher`, `install_vm_watchdog`, `install_certs_and_keys` on
      pve2; `install_all_svcs` on websvcs
 
@@ -130,7 +134,7 @@ Record the date in `docs/maintenance.md`.
 
 1. Wake pve2, restore secsvcs to VMID 999 with `--unique` and the NIC down
    - Log in on the console
-   - `systemctl list-units 'Homelab*'`: every service running
+   - `systemctl list-units | grep Homelab`: every service running
    - `podman exec postgres psql -U postgres -c '\l'`: lists the databases
    - Destroy it
 2. Restore the newest Headscale DB with `proxmox-backup-client restore ... --pattern`, then

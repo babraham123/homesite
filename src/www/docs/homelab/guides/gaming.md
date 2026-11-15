@@ -9,11 +9,23 @@ VM](./vm_windows.md)
 
 ```PowerShell
 winget install --scope machine utkuozdemir.nvidia_gpu_exporter
+# winget's alias is on the new PATH, which this shell doesn't have yet
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
 nvidia_gpu_exporter install
 # LocalSubnet is pve2's subnet, which holds websvcs
 New-NetFirewallRule -DisplayName "Nvidia GPU Exporter" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9835 -Profile Any -RemoteAddress LocalSubnet
 Start-Service nvidia_gpu_exporter
 ```
+
+## Heat
+
+At stock settings the RTX 3060 Ti reached 90°C with its fan at 100% and the driver hung.
+
+- Power limit: `InstallAutomation.ps1` sets 160 W (default 200 W) at boot and before each stream.
+  Check with `nvidia-smi -q -d POWER` (Current Power Limit) or the
+  `nvidia_smi_enforced_power_limit_watts` metric
+- Frame cap: NVIDIA Control Panel → Manage 3D settings → Global Settings → Max Frame Rate = 60,
+  Apply. It matches the 60 Hz stream, and the driver profile keeps it across reboots
 
 ## Streaming
 
@@ -103,11 +115,12 @@ sudo systemctl enable moonlight.service
 - Install [xone](https://github.com/dlundqvist/xone) driver
 
 ```bash
-# Plugin in dongle
+# Unplug the dongle first; the install also downloads its firmware
+sudo apt install -y dkms curl libarchive-tools
 git clone https://github.com/dlundqvist/xone
 cd xone
-sudo ./install.sh --release
-sudo xow-get-firmware.sh --skip-disclaimer
+sudo make install
+# Plug in the dongle
 ```
 
 - Power on controllers,

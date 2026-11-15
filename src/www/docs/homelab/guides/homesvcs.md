@@ -22,14 +22,15 @@ I use the SMLight SLZB-06M adapter, it's reasonably priced and very feature rich
 sudo su
 cd /root/homelab-rendered
 # Needs crowdsec_bouncer_homesvcs and the WAF client cert (secsvcs guide: Traefik WAF)
-src/nodes/homesvcs/install_svcs.sh traefik
-src/nodes/homesvcs/install_svcs.sh crowdsec_appsec
-src/nodes/homesvcs/install_svcs.sh vmagent
+src/base/podman/install_svcs.sh traefik
+src/base/podman/install_svcs.sh crowdsec_appsec
+src/base/podman/install_svcs.sh vmagent
 src/nodes/homesvcs/install_svcs.sh mosquitto
 src/nodes/homesvcs/install_svcs.sh zigbee2mqtt
-# src/nodes/homesvcs/install_svcs.sh esphome
+# Needs esphome_wifi_ssid and esphome_wifi_password
+src/nodes/homesvcs/install_svcs.sh esphome
 src/nodes/homesvcs/install_svcs.sh home_assistant
-src/nodes/homesvcs/install_svcs.sh fluentbit
+src/base/podman/install_svcs.sh fluentbit
 
 systemctl restart mdns_repeater
 systemctl list-units | grep Homelab
@@ -37,6 +38,9 @@ systemctl list-units | grep Homelab
 image_updater --dry-run
 ```
 
+- ESPHome: the install writes only `common/base.yaml` and `secrets.yaml` (from the homesvcs
+  secrets) into the `esphomeconfig` volume; the dashboard owns the device files. Onboard a board
+  with the [ESPHome guide](./esphome.md).
 - Home Assistant config: `src/services/home_assistant/config` is installed to
   `/etc/opt/home_assistant/config`, mounted writable at `/config/homelab`;
   `/config/configuration.yaml` and `custom_sentences` link into it. The UI's
@@ -58,25 +62,31 @@ systemctl restart home_assistant
 Refs: [ESPHome](https://esphome.io/components/ota/esphome.html),
 [Shelly](https://www.home-assistant.io/integrations/shelly)
 
-- Enable LAN access to various services
+- `install_network.sh` lets the MQTT broker's 8883 through. Not in use: Shelly devices
 
 ```bash
 POD_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
 NET_IFACE=$(ip -j -4 route show to default | jq -r '.[0].dev')
-# MQTT broker
-ufw allow in from any to any port 8883 proto tcp
-ufw route allow in on $NET_IFACE out on $POD_IFACE to any port 8883 proto tcp
-# ESPHome OTA updates. Published ports are DNATed to the containers, so the route rules are
-# what admit the traffic
-ufw allow in from 192.168.11.0/24 to any port 3232,8266,2040,8892 proto tcp
-ufw allow in from 192.168.21.0/24 to any port 3232,8266,2040,8892 proto tcp
-ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.11.0/24 to any port 3232,8266,2040,8892 proto tcp
-ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.21.0/24 to any port 3232,8266,2040,8892 proto tcp
 # HA, Shelly devices
 # ufw allow in from 192.168.11.0/24 to any port 5683 proto udp
 # ufw allow in from 192.168.21.0/24 to any port 5683 proto udp
 # ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.11.0/24 to any port 5683 proto udp
 # ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.21.0/24 to any port 5683 proto udp
+```
+
+- ESPHome needs no inbound rule: devices never connect in. The dashboard's OTA uploads (TCP 3232
+  ESP32, 8266 ESP8266) and status pings, and Home Assistant's native API (TCP 6053), all go out
+  from homesvcs to WiFiIoT.
+- pfSense's LAN → WiFiIoT rules must allow those, and they aren't documented per port. Once a
+  device is on WiFiIoT, check from homesvcs (containers leave through its address):
+
+```bash
+dev=<name>.iot.home.arpa
+ping -c 3 "$dev"
+# 3232 for an ESP32, 8266 for an ESP8266
+for port in 6053 3232; do
+  timeout 3 bash -c "</dev/tcp/$dev/$port" && echo "$port open" || echo "$port blocked"
+done
 ```
 
 ## Onboarding
@@ -111,8 +121,8 @@ ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.21.0/24 to any p
 - Connect to InfluxDB
   - Go to Settings >> Devices & Services >> Add Integration
   - Search InfluxDB and add
-  - version = 2.x/3, url = <https://metrics.janedoe.com:443/api/v2/write>, verify SSL,
-    organization = hass, bucket = hass
+  - version = 2.x/3, url = <https://metrics.janedoe.com:443> (the client adds
+    `/api/v2/write`), verify SSL, organization = hass, bucket = hass
   - To get the token, run
     `/root/homelab-rendered/src/base/podman/get_secret.sh victoriametrics_admin_creds_hash`
 - Create the backup token

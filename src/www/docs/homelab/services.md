@@ -7,15 +7,16 @@ Container catalog, host services, observability and backups. Hostnames use the p
   node's bridge network ([ADR 0001](adr/0001-podman-quadlets-over-kubernetes.md))
 - The catalog is what the repo defines; what runs is whatever `install_svcs.sh` installed
   (`systemctl list-units "*.service"` on the node)
-- Raw list: `grep -rn "^IP=" src --include="*.container.j2*"`
+- Raw list: `grep -rn "^IP=" src`, which also finds the shared services' drop-ins
+  (`src/nodes/<node>/<container>.container.d/`)
 - Not in use, so not in any `inventory.yml` or the tables below, though their quadlets exist:
-  esphome (homesvcs), go2rtc and the `wyoming` quadlets piper, whisper and openwakeword (websvcs)
+  frigate and the `wyoming` quadlets piper, whisper and openwakeword (websvcs)
 
 ## secsvcs: identity, certificates, observability (pve1, 10.10.0.0/24)
 
 | IP | Service | Image | Purpose | URL |
 | ----- | --------- | ------- | --------- | ----- |
-| .3 | postgres | postgres | Authelia, Guacamole and Vaultwarden storage | pgdb (internal DNS only) |
+| .3 | postgres | postgres | Storage for Authelia, LLDAP, Gatus, Grafana and Vaultwarden | pgdb (internal DNS only) |
 | .4 | lldap | lldap | User/group directory | ldap.janedoe.com |
 | .5 | authelia | authelia | SSO portal, OIDC provider | auth.janedoe.com |
 | .6 | traefik | traefik | Node ingress, TLS termination | secproxy.janedoe.com |
@@ -30,7 +31,7 @@ Container catalog, host services, observability and backups. Hostnames use the p
 | .15 | olive_tin | olivetin | Web buttons for admin actions (via SSH dispatcher) | command.janedoe.com |
 | .16 | crowdsec | crowdsec | IP bans from the logs, LAPI for the VPS's bouncer ([Security](security.md#the-edge-haproxy)) | crowdsec (internal DNS only), port 8455 |
 | .17 | vaultwarden | vaultwarden/server | Password manager, public, SSO-only via Authelia | vault.janedoe.com |
-| .18 | ntfy_idp_push | ntfy-idp-push | Mobile push for Authelia over ntfy; people's ntfy accounts from LLDAP | idp-push.janedoe.com |
+| .18 | ntfy_idp_push | ntfy-idp-push | People's ntfy accounts from LLDAP; Authelia's mobile push over ntfy once Authelia can call it (authelia#7647) | idp-push.janedoe.com |
 | .20 | fluentbit | fluent-bit | Journal → VictoriaLogs forwarder | n/a |
 | .23 | crowdsec_appsec | crowdsec | WAF for the node's Traefik ([Security](security.md#the-edge-haproxy)) | n/a |
 
@@ -43,8 +44,6 @@ Container catalog, host services, observability and backups. Hostnames use the p
 | .8 | nginx | nginx | Static site + error pages | `www.janedoe.com`, apex |
 | .9 | homepage | homepage | Service dashboard | dash.janedoe.com |
 | .10 | isso | isso | Blog comments | comment.janedoe.com |
-| .15 | guacd | guacd | Guacamole protocol daemon | n/a |
-| .16 | guacamole | guacamole | Browser remote desktop | remote.janedoe.com |
 | .17 | linkding | linkding:latest-plus | Bookmarks and page archive | archive.janedoe.com |
 | .18 | readeck | readeck | Read-it-later reader | read.janedoe.com |
 | .19 | copyparty | copyparty/ac | File server (behind Authelia) | files.janedoe.com |
@@ -77,6 +76,7 @@ yt_to_audiobook images carry their own batch runners (`/opt/*_batch.py`, from ea
 | .7 | vmagent | vmagent | Local metrics scraper | n/a |
 | .8 | mosquitto | eclipse-mosquitto | MQTT broker | mqtt (internal DNS only) |
 | .9 | zigbee2mqtt | zigbee2mqtt | Zigbee ↔ MQTT bridge | zigbee.janedoe.com |
+| .10 | esphome | esphome | ESP32/ESP8266 firmware builder, OTA updates ([guide](guides/esphome.md)) | iot.janedoe.com |
 | .11 | home_assistant | home-assistant | Home automation hub | home.janedoe.com |
 | .20 | fluentbit | fluent-bit:5.1 | Journal → VictoriaLogs forwarder | n/a |
 | .23 | crowdsec_appsec | crowdsec | WAF for the node's Traefik ([Security](security.md#the-edge-haproxy)) | n/a |
@@ -97,13 +97,13 @@ yt_to_audiobook images carry their own batch runners (`/opt/*_batch.py`, from ea
 | container VMs, vpnsvcs | image_updater (timer) | Nightly image updates behind a Trivy scan ([podman-image-updater](https://github.com/babraham123/podman-image-updater), [Maintenance](maintenance.md#container-images)) |
 | container VMs, vpnsvcs, pve1, pve2 | node_exporter | Host metrics |
 | websvcs, devtop, gaming | nvidia_gpu_exporter | GPU temperature, power, clocks for the cards pve2 passes through; "GPUs" dashboard |
-| pve1, pve2 | vm_watchdog | VM health watchdog |
+| pve1, pve2 | vm_watchdog | Resets a VM that froze ([VM watchdog](#vm-watchdog)) |
 | pve1 | cert_notifier (timer) | Email warnings before cert expiry (msmtp) |
 | pve1 | ct_watch (timer) | Daily ctlogs.dev check for certs the homelab didn't request ([Security](security.md#tls-and-trust-hierarchy)) |
 | secsvcs | net_probe (timer) | Hourly pings, speed tests and iperf3 across the network ([net-probe](https://github.com/babraham123/net-probe), pinned by release tag and sha256; [Networking](networking.md#throughput-monitoring)); "Network" dashboard |
 | websvcs, vpnsvcs | iperf3_server | iperf3 target for net_probe, `:5201`, secsvcs only |
 | pve1 | backup_orchestrator (timer) | Weekly backup run ([Storage and backups](#storage-and-backups)) |
-| websvcs | snapraid sync/scrub (timers), smartmontools, smartctl_exporter | Media array parity and disk health; "Disks" dashboard |
+| websvcs | snapraid sync/scrub (timers), smartmontools, smartctl_exporter, hd-idle | Media array parity, disk health and spin-down; "Disks" dashboard |
 | vpnsvcs | haproxy | Public ingress ([Networking](networking.md#ingress-the-three-tier-chain)) |
 | vpnsvcs | headscale, tailscaled | Mesh VPN coordinator + client |
 | vpnsvcs | crowdsec-firewall-bouncer | Drops CrowdSec's banned IPs in nftables ([Security](security.md#the-edge-haproxy)) |
@@ -119,9 +119,32 @@ pve1, pve2, pbs2 and the router serve their own web UIs as pve1/pve2/pbs2/router
   certs; requests to them get a 403
 - `acme_transfer.sh` (`src/nodes/pve1/certificates/`) installs the certs on each host
 
+### VM watchdog
+
+`src/base/vm_watchdog/vm_watchdog.py` checks each running VM on pve1 and pve2 every 30 seconds
+through its QEMU guest agent (the `qemu-guest-agent` service in the guest, enabled per VM in PVE):
+
+- **Frozen** means the agent answered after the VM started, then went silent for 3 minutes in which
+  the guest also sent no network traffic and did no disk I/O. A guest that reboots or installs
+  updates without its agent keeps doing I/O, so it gets an hour before a reset. A VM whose agent
+  never answered is never reset (no agent installed, or still booting)
+- **Reset** is `qm stop` and `qm start`, at most 3 times in 6 hours per VM; then it is left as it is
+  and `VMWatchdogGaveUp` fires
+- **On hold**, checking nothing and starting every VM's silence over afterwards: while paused by
+  hand, while `backup_orchestrator` runs, during any vzdump, while apt, dpkg or unattended-upgrades
+  runs on the host, and while pve-guests starts or stops the guests. A VM is also skipped while it
+  is locked (backup, snapshot), paused by QEMU, or the target of a running PVE task (start,
+  shutdown, migrate)
+- **Pause by hand** for maintenance a VM goes through without its agent, like a pfSense upgrade:
+  `ssh autoadmin@pve1 pause_vm_watchdog` (2 hours, also an OliveTin button) and
+  `resume_vm_watchdog`; the pause also ends at the host's next boot
+- **Metrics** in `homelab_vm_watchdog.prom` on the host's textfile collector feed the
+  `vm_watchdog` alert group in `homelab.yml`
+
 ## Observability
 
-Metrics and logs converge on secsvcs; alerts end as phone push notifications.
+Metrics and logs converge on secsvcs; alerts end as phone push notifications. Labels, log fields
+and example queries: [queries](queries.md).
 
 ```mermaid
 flowchart LR
@@ -132,10 +155,11 @@ flowchart LR
     end
 
     tg["Telegraf on pfSense"]
+    sl["syslogd on pfSense"]
 
-    subgraph agents["homesvcs, websvcs and the VPS"]
-        vmagent["vmagent"]
-        fb["Fluent Bit"]
+    subgraph agents["Agents"]
+        vmagent["vmagent<br/>homesvcs, websvcs, VPS"]
+        fb["Fluent Bit<br/>secsvcs, homesvcs, websvcs, VPS"]
     end
 
     subgraph sec["secsvcs (10.10.0.0/24)"]
@@ -158,6 +182,7 @@ flowchart LR
     ne & sm -- "scrape (secsvcs targets)" --> vm
     tg -- "remote write" --> vm
     fb -- "push" --> vl
+    sl -- "syslog UDP :5140" --> vl
     vm -- "rules" --> va
     va -- "alerts" --> am
     am -- "route" --> nam
@@ -174,7 +199,7 @@ flowchart LR
     classDef agent stroke:#fbbf24,fill:transparent
     classDef data stroke:#22d3ee,fill:transparent
     class ne,sm,jd,phone src
-    class tg,vmagent,fb,va,am,nam,ntfy,gatus agent
+    class tg,sl,vmagent,fb,va,am,nam,ntfy,gatus agent
     class vm,vl,graf data
 ```
 
@@ -194,6 +219,17 @@ flowchart LR
     vmagent in), tailscaled and node_exporter
   - `VpsMetricsAbsent` fires on silence, since a pushing host can't raise `up == 0`; `HaproxyDown`
     and `HaproxyBackendConnectErrors` cover the edge; "HAProxy" dashboard
+  - Bandwidth: Linode bills what leaves `eth0` past the plan's monthly pool
+    (`vps_mb_limit` in `vars.yml`, which vmalert records in bytes as
+    `homelab_vps_transfer_pool_bytes` from `plans.yml.j2` so the rules and dashboards stay free of
+    Jinja). The "VPS bandwidth" dashboard shows the rolling 30-day `eth0` transmit against it
+    (needs `retention.metric_days` of 30 or more), and stacks `eth0` transmit by source:
+    `tailnet` is `tailscale0` transmit (WireGuard to home: funnel requests, backups, pushes);
+    `derp + headscale` and `funnel` are HAProxy's bytes to clients from the `vpn.SITE` backends
+    and the `*svcs` proxies, since DERP ends on Headscale and never touches `tailscale0`; `other`
+    is the rest, mostly per-packet headers. `tailscale0` receive stays out: much of it ends on the
+    VPS (acks, replies to its pushes, net_probe's iperf3 upload). `VpsTransferHigh` fires at 80%
+    of the pool. Per subdomain: the bytes-per-SNI LogsQL query in [queries](queries.md)
 - **CrowdSec**: the engine's and LAPI's metrics (`:6060`) scraped on secsvcs, each node's AppSec
   (`appsec:6060`) by that node's scraper, the VPS's firewall bouncer (`:60601` on the bridge
   gateway) by the VPS's vmagent; "CrowdSec" dashboard
@@ -203,7 +239,7 @@ flowchart LR
 - **Retention** for metrics, logs and Home Assistant history: `vars.yml`
 - **Gatus**, independent of the metrics pipeline:
   - HTTPS checks generated from the `uptime` keys in `src/nodes/<node>/inventory.yml`, every 10
-    minutes; every 2 for `uptime_tier: 1` (the proxies, the login portal, the pages opened first)
+    minutes; every 2 for `uptime_tier: 1` (the login portal, the pages opened first)
   - Every HTTPS check fails with under 14 days of cert left; a `tls://` check covers LDAPS;
     cert_notifier emails cover Postgres and Mosquitto
   - No notifier of its own: results are scraped, and `EndpointDown` and the cert rules fire through
@@ -211,15 +247,20 @@ flowchart LR
 - **Alert rules**, `src/services/vmalert/configs/`, one file per concern; severity `critical` >
   `error` > `warning` > `info` maps to ntfy priority:
   - `homelab.yml`: hosts (`NodeDown`, `DiskAlmostFull`, `DiskFillingIn24h`, `MemoryPressure`,
-    `HighLoad`, `HighCpuTemp`, `SystemdUnitFailed` for any "Homelab:" unit, `ClockSkew`),
+    `HighLoad`, `HighCpuTemp`, `OomKill`, `SystemdUnitFailed` for any "Homelab:" unit,
+    `ServiceRestartLoop`, `ClockSkew`),
     `TargetDown`, `AuthFailureBurst` (Authelia), and the Gatus-fed `EndpointDown`,
-    `CertExpiringSoon` (14 days), `CertExpiringCritical` (3 days)
+    `CertExpiringSoon` (14 days), `CertExpiringCritical` (3 days), and vm_watchdog's
+    `VMWatchdogReset`, `VMWatchdogGaveUp`, `VMAgentDown`, `VMWatchdogOnHold`, `VMWatchdogStale`,
+    and the image updater's `ImageUpdaterStale` and `ImageUpdateBlocked`; Alertmanager sends
+    `ImageUpdateBlocked` only as a Monday-morning email digest, never to ntfy
   - `backups.yml`: `BackupStale`, `BackupNeverRan`, `SnapraidStale`
-  - `hardware.yml`: GPUs (`GpuHot`, `GpuThermalThrottling`, `GpuRecoveryNeeded`) and the media
-    array's SMART (`DiskUnhealthy`, `DiskHot`, `DiskSectorsGrowing`, `DiskCrcErrors`)
+  - `hardware.yml`: GPUs (`GpuHot`, `GpuThermalThrottling`, `GpuRecoveryNeeded`, `GpuLost`) and
+    the media array's SMART (`DiskUnhealthy`, `DiskHot`, `DiskSectorsGrowing`, `DiskCrcErrors`)
   - `network.yml`: `WanSlow` (three speed tests under half the plan), `VpsPathDown`,
     `NetProbeStale`, `NetProbeAbsent`
-  - `vps.yml`: `VpsMetricsAbsent`, `HaproxyDown`, `HaproxyBackendConnectErrors`
+  - `vps.yml`: `VpsMetricsAbsent`, `HaproxyDown`, `HaproxyBackendConnectErrors`,
+    `VpsTransferHigh`; `plans.yml.j2` records plan limits from `vars.yml` as series
   - `crowdsec.yml`: `CrowdsecDown`, `CrowdsecBouncerStale` (no pull in 10 minutes),
     `CrowdsecAppsecDown` (a node's WAF), `CrowdsecNotParsing` (no Traefik line parsed in an hour)
   - `pipeline.yml`: `Watchdog`
@@ -230,7 +271,11 @@ flowchart LR
   - Alertmanager: grouped by alert and instance, 30 s wait, 24 h repeat; emails `+alert@` and posts
     to ntfy-alertmanager
   - ntfy-alertmanager: severity → ntfy priority, `host` label → tag; pushes to ntfy's `alert` topic
-    (the phone app, iOS via ntfy.sh) and emails `+alert2@`
+    (the phone app, iOS via ntfy.sh)
+  - Mute for maintenance: OliveTin's Alerts buttons (`ssh autoadmin@secsvcs mute_alerts_4h`,
+    `unmute_alerts`) add or end a silence on everything but Watchdog; it expires on its own.
+    The weekly backup run brackets itself with `mute_backup_run`/`unmute_backup_run`, a silence
+    on pve2 and its VMs only, since waking and sleeping pve2 trips their alerts
   - Container-to-container URLs are `<name>.SITE:<port>`, never through Traefik
 - **Dead-man switch**, since the path above lives entirely on secsvcs:
   - vmalert's `Watchdog` always fires; Alertmanager routes it to a null receiver
@@ -250,8 +295,8 @@ flowchart LR
 ## Storage and backups
 
 - **Container state**: named Podman volumes (`postgres18`, `grafanadata`, `vmdata`, `vldata`,
-  `ntfydb`, `vaultwardendata`, `hassdb`, `hassconfig`, `mqttdata`, `z2mdb`, …), `/etc/opt` and
-  `/var/opt`
+  `ntfydb`, `vaultwardendata`, `hassdb`, `hassconfig`, `mqttdata`, `z2mdb`, `esphomeconfig`, …),
+  `/etc/opt` and `/var/opt`
 - **VM disks**: LVM-thin on each host's NVMe, ext4 guests; no ZFS or RAID, backups over redundancy
 - **Media array** on pve2: four HDDs on a passed-through SATA card, snapraid parity, mergerfs, owned
   by websvcs. Not backed up; parity is its protection ([pve2 storage guide](guides/pve2_storage.md))
@@ -281,7 +326,7 @@ flowchart LR
   4. `prune.sh` on pve2 (dispatcher `prune`): the PBS prune jobs, then garbage collection. After
      the upload, so this run's snapshots count, and while PBS is up
   5. `acme_transfer.sh`: Traefik's renewed certs onto pve1, pve2, PBS and pfSense, while pve2 is up
-  6. A `homelab_backup_last_success_timestamp_seconds{job}` metric per step, `BackupStale` after 15
+  6. A `homelab_backup_last_success_timestamp_seconds{step}` metric per step, `BackupStale` after 15
      days (`src/services/vmalert/configs/backups.yml`), an ntfy summary, and pve2 off again if it
      was off
 - **Retention**, PBS prune jobs per namespace, set in `src/nodes/pve2/prune.sh`:

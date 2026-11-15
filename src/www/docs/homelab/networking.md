@@ -105,8 +105,13 @@ Unbound on pfSense serves split-horizon DNS for the site domain:
   `auth.janedoe.com → 192.168.4.20`). HAProxy's SNI routing uses the same lists.
 - A catch-all `janedoe.com A <websvcs>` record makes websvcs the default for the apex and anything
   unlisted.
-- Internal-only names exist for `pgdb.` (Postgres) and `mqtt.` (Mosquitto); these resolve nowhere on
-  the public internet.
+- Tailnet clients never ask unbound: Headscale overrides their DNS with public resolvers, so the
+  same names (hosts, VMs, each node's service subdomains, the apex) are pushed as MagicDNS extra
+  records from `src/services/headscale/extra_records.json.j2`, pointing at the LAN addresses the
+  subnet routes reach. `vpn`/`vpnsvcs` stay public, and a wildcard isn't possible, so a new
+  websvcs subdomain needs its inventory entry to resolve from the tailnet.
+- Internal-only names exist for `pgdb.` (Postgres), `mqtt.` (Mosquitto) and `crowdsec.` (the
+  CrowdSec LAPI); these resolve nowhere on the public internet.
 - `vpn.janedoe.com` and `vpnsvcs.janedoe.com` are `transparent`: they resolve via public DNS to the
   VPS, even for internal clients.
 
@@ -126,7 +131,8 @@ boundaries, which VLAN segmentation otherwise breaks. Three pieces bridge it:
   deliberately gets no discovery.
 - A host-level **`mdns_repeater`** service on the container VMs repeats mDNS between the VM's NIC
   and its internal Podman bridge, so containers (e.g. Home Assistant) can discover devices.
-- A firewall rule allows UDP/5353 to the multicast range across the bridged VLANs.
+- No firewall rule of its own: the bridged VLANs keep LAN's allow-all rules, which pass UDP/5353 to
+  the multicast group.
 
 Gotcha: `avahi-daemon` must be disabled where `mdns_repeater` runs; it silently intercepts queries
 first. `probes/mdns.js` is a probe script for verifying which service types are visible from a given
@@ -187,12 +193,22 @@ key on the client IP, so each hop passes it on and trusts it only from the hop b
 | Traefik → app | `X-Forwarded-For` and `X-Real-Ip`, with the client IP Traefik resolved | the app's trusted-proxy setting |
 | Traefik → Authelia (ForwardAuth, `trustForwardHeader`) | `X-Forwarded-For` | any peer that reaches :9091 |
 
-Both Traefik `trustedIPs` lists hold only vpnsvcs's tailnet address (`vpnsvcs.tailnet_ip`).
-pfSense routes tailnet traffic in the kernel without SNAT, so HAProxy's connections
-keep that source address and every other tailnet, LAN or VLAN client arrives from its own address,
-which can't assert a client IP. If pfSense falls back to SNAT (for example after a Tailscale package
-update overwrites the System Patches change), HAProxy's connections arrive from the subnet gateway
-`.1`, which isn't trusted: Traefik ignores the PROXY header and logs every public client as `.1`.
+`forwardedHeaders.trustedIPs` holds only vpnsvcs's tailnet address (`vpnsvcs.tailnet_ip`);
+`proxyProtocol.trustedIPs` adds the two node-subnet gateways (`pve1.subnet.1`, `pve2.subnet.1`).
+pfSense routes tailnet traffic in the kernel without SNAT, so HAProxy's connections keep the tailnet
+source address and every other tailnet, LAN or VLAN client arrives from its own address, which can't
+assert a client IP. If pfSense falls back to SNAT (for example after a Tailscale package update
+overwrites the System Patches change), HAProxy's connections arrive from the gateway `.1`, and the
+PROXY header from it still names the real client: the WAF, `home-only`, bans and access logs keep
+working. Only pfSense, and tailnet clients while it SNATs, send from a gateway, so only they could
+assert a client address. Tailnet clients under SNAT send no header and show up as `.1`.
+
+The `ProxyChainBroken` alert (`src/services/vmalert/logs/traefik.yml.j2`) fires on any request from
+a gateway or the router, which under SNAT your own tailnet devices make, and on requests from the
+VPS other than its own telemetry pushes, which is what a backend without `send-proxy-v2` looks like:
+those clients pass as the VPS, a home address, so they skip the WAF and pass `home-only`.
+`tools/check_rendered.py` fails a render whose HAProxy config has a server off the VPS without
+`send-proxy-v2`, so the alert is for what reaches the VPS some other way.
 
 Per app:
 
@@ -229,5 +245,6 @@ address since pfSense routes subnet traffic without SNAT. "Network" dashboard;
 ## Router extras
 
 pfSense also runs CoDel traffic shaping (bufferbloat control), ntopng for traffic inspection,
-Telegraf for metrics export to VictoriaMetrics, and the Auto Config Backup package. Remote pfSense
-actions (e.g. waking pve2) go through autoadmin; see [the router guide](guides/router.md).
+Telegraf for metrics export to VictoriaMetrics, remote syslog of system notices (no firewall or DNS
+events) to VictoriaLogs, and the Auto Config Backup package. Remote pfSense actions (e.g. waking
+pve2) go through autoadmin; see [the router guide](guides/router.md).

@@ -76,6 +76,15 @@ headscale --user USER_ID preauthkeys create --expiration 100y
 
 ## Remote access
 
+- Install HAProxy first: Headscale listens on 8443 (and 8080 for its certificate), and only
+  HAProxy maps 443 and 80 to them, so nothing can log in without it
+
+```bash
+sudo su
+cd /root/homelab-rendered
+src/nodes/vpnsvcs/install_svcs.sh haproxy
+```
+
 - For home network, use Tailscale plugin on pfSense
   ([src](https://www.wundertech.net/how-to-set-up-tailscale-on-pfsense/),
   [ref](https://davidisaksson.dev/posts/tailscale-on-pfsense/))
@@ -83,15 +92,15 @@ headscale --user USER_ID preauthkeys create --expiration 100y
   - Go to VPN >> Tailscale
   - Setup as an [Exit Node](https://headscale.net/stable/ref/routes/#exit-node) for the desired
     subnet
+  - Apply the [Tailscale package patch](./router.md#tailscale-package-patch)
   - Restart pfSense ([issue](https://github.com/tailscale/tailscale/issues/7780))
   - On the VPN server, enable pfSense's routes, [ref](https://headscale.net/stable/ref/routes/)
 
 ```bash
 headscale nodes list-routes
-# Repeat for all desired subnets
-headscale nodes approve-routes --identifier NODE_ID --routes 0.0.0.0/0,::/0
-headscale nodes approve-routes --identifier NODE_ID --routes 192.168.5.0/24
-headscale nodes approve-routes --identifier NODE_ID --routes 192.168.7.0/24
+# Every route in one call: each call replaces the node's whole approved list
+headscale nodes approve-routes --identifier NODE_ID \
+  --routes 0.0.0.0/0,::/0,192.168.2.0/24,192.168.4.0/24
 ```
 
 - Machine users can connect now; skip [Add public endpoint](#add-public-endpoint) for a private VPN
@@ -110,7 +119,7 @@ exit
 exit
 ssh manualadmin@secsvcs
 sudo podman run --rmi docker.io/authelia/authelia:latest authelia crypto rand --length 72 --charset rfc3986
-sudo podman run docker.io/authelia/authelia:latest authelia crypto hash generate pbkdf2 --variant sha512 --random --random.length 72 --random.charset rfc3986
+sudo podman run docker.io/authelia/authelia:latest authelia crypto hash generate sha2crypt --iterations 1000 --random --random.length 72 --random.charset rfc3986
 # Store hashed and raw version of secret under hs_oidc_secret(_hash). id under hs_oidc_id
 ssh -t manualadmin@pve1 'sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh secsvcs'
 # Restart authelia to pick up hashed secret version
@@ -130,14 +139,7 @@ chown headscale:headscale /etc/opt/secrets/hs_oidc_*
 chmod 600 /etc/opt/secrets/*
 ```
 
-- Route traffic via HAProxy
-
-```bash
-sudo su
-cd /root/homelab-rendered
-src/nodes/vpnsvcs/install_svcs.sh haproxy
-```
-
+- HAProxy, installed under [Remote access](#remote-access), already routes every subdomain
 - Update Headscale
   - `src/nodes/vpnsvcs/install_svcs.sh headscale`
 - Update your DNS A record
@@ -255,13 +257,16 @@ sudo tailscale up --login-server https://vpn.janedoe.com:443 --accept-routes --a
 # after tools/upload_src.sh vpnsvcs ...
 cd /root/homelab-rendered/src
 cp services/headscale/headscale_acl.hujson /etc/headscale/acl.hujson
-# Runs the policy's tests against the DB
+# Runs the policy's tests against the DB, which needs headscale stopped
+systemctl stop headscale
 headscale policy check --file /etc/headscale/acl.hujson --bypass-grpc-and-access-database-directly
-systemctl reload headscale        # a failing policy is rejected
+systemctl start headscale         # a failing policy is rejected at load
 journalctl -eu headscale --no-pager | tail -20
 ```
 
 - Spot-check from a node: `tailscale debug netmap | jq '.PacketFilter'`, `nc -zv HOST PORT`
+- Rollback to allow-all: set `path: ""` under `policy:` in `/etc/headscale/config.yaml` and
+  `systemctl restart headscale`
 
 ## Guest users
 
@@ -285,13 +290,13 @@ headscale --user USER_ID preauthkeys create --expiration 1h
 - Do the `/etc/hosts` step in [Add public endpoint](#add-public-endpoint)
 - Follow the [Podman guide](./podman.md): Install Podman, Networking, Secrets, Monitoring and Image
   updater
-- Open the gateway to vmagent and the containers' path to secsvcs
+- Open the containers' path to secsvcs (`install_network.sh` opened the gateway's exporter
+  ports to vmagent)
 
 ```bash
 sudo su
 cd /root/homelab-rendered
 POD_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
-ufw allow in on $POD_IFACE from 10.13.0.7 to any port 8405,9090 proto tcp
 ufw allow in on $POD_IFACE from 10.13.0.0/24 to any port 53 proto udp
 ufw route allow in on $POD_IFACE out on tailscale0 to 192.168.4.20 port 443 proto tcp
 ufw route allow in on $POD_IFACE out on tailscale0 to 100.100.100.100 port 80 proto tcp
@@ -301,12 +306,13 @@ src/nodes/vpnsvcs/install_svcs.sh headscale
 ```
 
 - On pve1: `sudo /root/homelab-rendered/src/nodes/pve1/secret_update.sh vpnsvcs`
-  - Copy the two passwords and `ntfy_alert_token` from `secsvcs.yaml`; add the Docker Hub token
+  - Copy the two passwords and `ntfy_alert_token` from `secsvcs.yaml`; add `docker_hub_username`
+    and `docker_hub_token`
 - Install and check
 
 ```bash
-src/nodes/vpnsvcs/install_svcs.sh fluentbit
-src/nodes/vpnsvcs/install_svcs.sh vmagent
+src/base/podman/install_svcs.sh fluentbit
+src/base/podman/install_svcs.sh vmagent
 ss -ltnp | grep -E ':(8405|9090|9100) '   # 8405, 9090 on 10.13.0.1 only
 podman exec vmagent wget -qO- 10.13.0.1:8405/metrics | head -3
 podman exec vmagent wget -qO- 100.100.100.100/metrics | head -3   # tailscaled through tailscale0
@@ -352,13 +358,11 @@ vim /etc/opt/secrets/crowdsec_bouncer_key
 chmod 600 /etc/opt/secrets/*
 ```
 
-- Open the firewall and install
+- Open the LAPI egress and install (`install_network.sh` opened `60601` to vmagent)
 
 ```bash
 cd /root/homelab-rendered
-POD_IFACE=$(podman network inspect systemd-net | jq -r '.[0].network_interface')
 ufw allow out on tailscale0 from any to 192.168.4.20 port 8455 proto tcp
-ufw allow in on $POD_IFACE from 10.13.0.7 to any port 60601 proto tcp
 src/nodes/vpnsvcs/install_svcs.sh crowdsec_firewall_bouncer
 nft list tables                       # crowdsec and crowdsec6
 journalctl -u crowdsec-firewall-bouncer --no-pager | tail   # no TLS or 403 errors
@@ -372,7 +376,7 @@ journalctl -u crowdsec-firewall-bouncer --no-pager | tail   # no TLS or 403 erro
   ```
 
   - On the VPS, `nft list ruleset | grep 203.0.113.7` within 10 s
-  - `cscli decisions delete --ip 203.0.113.7` removes it
+  - On secsvcs, `sudo podman exec crowdsec cscli decisions delete --ip 203.0.113.7` removes it
 
 - Rotate the key
   - Update both secrets
@@ -436,8 +440,8 @@ journalctl -u deadman --no-pager | tail       # silent when healthy
   2. From pve1, put the files back
 
      ```bash
-     scp -r /root/backups/vpnsvcs manualadmin@NEW_IP:
-     ssh -t manualadmin@NEW_IP 'sudo cp -a vpnsvcs/files/. / && sudo rm -rf vpnsvcs'
+     scp -P 2202 -r /root/backups/vpnsvcs manualadmin@NEW_IP:
+     ssh -p 2202 -t manualadmin@NEW_IP 'sudo cp -a vpnsvcs/files/. / && sudo rm -rf vpnsvcs'
      ```
 
   3. Continue the guide

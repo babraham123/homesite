@@ -161,6 +161,11 @@ rm "$tcd" "traefik-certs-dumper_${TCD_VERSION}_checksums.txt"
 /root/homelab-rendered/src/nodes/pve1/certificates/acme_transfer.sh
 ```
 
+- Delete pfSense's default cert: the web GUI now uses the imported one, and pfSense refuses to
+  delete a cert in use
+  - Go to System >> Certificates >> Certificates
+  - Delete `webConfigurator default`
+
 ## Notifications
 
 - Create a custom Gmail account
@@ -194,6 +199,8 @@ apparmor_parser -r /etc/apparmor.d/usr.bin.msmtp
 cd /root/homelab-rendered
 cp src/base/debian/msmtprc /etc
 src/nodes/pve1/install_svcs.sh cert_notifier
+# Daily ntfy alert on certificates for the domain this homelab didn't request
+src/nodes/pve1/install_svcs.sh ct_watch
 ```
 
 ## Backups

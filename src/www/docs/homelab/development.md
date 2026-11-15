@@ -4,6 +4,7 @@
 
 - Setup your local computer. Here are the instructions for a [Mac](./guides/mac_personal.md)
 - Create a `vars.yml` file from the `vars.template.yml` example
+- Optional: give Claude Code query access to metrics and logs ([guide](./guides/claude_telemetry.md))
 
 ## Code structure
 
@@ -12,23 +13,27 @@
 - `vars.yml` contains specific/personal values for rendering (gitignored), `vars.template.yml` is an
   example
 - All `*.j2` files are processed through Jinja2 via `jinjanate` at render time
-- `*.j2.j2` files undergo a *second* render pass on the node, by one of the
-  `src/base/podman/render_*.sh` scripts:
-  - `render_host.sh`, at install time from `install_svcs.sh`: per-node values in the vmagent and
-    Fluent Bit quadlets
-  - `render_secrets.sh`, at container start (`ExecStartPre`): secrets injection
-  - `render_services.sh`, at container start: Fluent Bit's config, with the node's "Homelab:" units
+- `*.j2.j2` files undergo a *second* render pass on the node, at container start
+  (`ExecStartPre`), by one of the `src/base/podman/render_*.sh` scripts. Its Jinja is written
+  with square brackets, `[[ var ]]` and `[% block %]` (`src/base/podman/second_pass.py`), which the
+  first pass leaves as text, so no `{% raw %}` and no pass ever sees the other's variables:
+  - `render_secrets.sh`: secrets injection, `[[ env('SECRET') ]]`, for apps that take a secret
+    only inline (Alertmanager's bcrypt hash, ntfy's users and tokens, ntfy-alertmanager). Apps
+    with a `*_file` option read the secret file Podman mounts under `/run/secrets/` instead
+    (Alertmanager's `config.yml`)
+  - `render_services.sh`: Fluent Bit's config, with the node's "Homelab:" units
 - `src/nodes/<node>/inventory.yml`, one per node, is the node inventory: each node's dispatcher
-  entries (services in install order, other commands) and each service's subdomain, Gatus endpoint
-  and container image facts (`upstream`/`build`, `update_last`, `containers`). `render_src.sh`
-  appends it to `vars.yml` as `nodes:` in a private temp `all_vars.yml`, and templates import
-  `src/nodes.jinja` for the lists derived from it (dispatcher cases, sudoers grants, OliveTin
-  buttons, DNS/SNI subdomains, uptime endpoints, image update order). See [ADR
-  0006](adr/0006-node-inventory.md)
+  entries (services in install order, other commands) and each service's subdomain, Gatus endpoint,
+  container address (`ip`, read back as `inv.addr.<node>.<service>`) and container image facts
+  (`upstream`/`build`, `update_last`, `containers`). `render_src.sh`
+  appends it to `vars.yml` as `nodes:` in a private temp `all_vars.yml`, together with the lists
+  `tools/inventory.py` derives from it as `inv:` (dispatcher cases, sudoers grants, OliveTin
+  buttons, DNS/SNI subdomains, uptime endpoints, image update order), which templates read as
+  `inv.<name>`. See [ADR 0006](adr/0006-node-inventory.md)
 
 ### Service Structure
 
-`src/` has three groups, plus `nodes.jinja`:
+`src/` has three groups:
 
 - `src/nodes/<node>/`, one per node. May contain:
   - `install_svcs.sh`: one `case` per service that installs configs to `/etc/opt/<service>/` and
@@ -40,7 +45,7 @@
     updater](https://github.com/babraham123/podman-image-updater), with the image list in
     `src/base/podman/image_updater.json.j2`) loads the service's images and passes them through
     the scan gate, or stops the install
-  - `inventory.yml`: the node's part of the node inventory (keys documented in `src/nodes.jinja`)
+  - `inventory.yml`: the node's part of the node inventory (keys documented in `tools/inventory.py`)
   - `commands.sh` - Other tasks that run as root and are triggered remotely
   - `traefik/`: the node's reverse proxy routing rules (HTTP routers, middlewares); the config
     shared by every node is `src/services/traefik/`
@@ -50,9 +55,11 @@
   - `*.volume`: Podman volume definitions
   - Service configuration files
 - `src/base/`: setup shared across nodes, all shipped to every Debian node: `debian/`, `podman/`,
-  `node_exporter/`, `vm_watchdog/`. `debian/dispatcher.sh` and `debian/sudoers` are every Debian
-  node's (all but the router and gaming), selected at runtime by hostname; the router's and
-  gaming's dispatchers are in their node directories
+  `node_exporter/`, `vm_watchdog/`, `net_probe/`, `iperf3_server/`, `mdns_repeater/`, plus `lib.sh`
+  (the scripts' shared helpers) and `ntfy.py` (ntfy pushes from the Python scripts).
+  `debian/dispatcher.sh` and `debian/sudoers` are every Debian node's (all but the router and
+  gaming), selected at runtime by hostname; the router's and gaming's dispatchers are in their
+  node directories
 - `src/clients/`: setup for devices that aren't nodes and never get an upload: `macos/`, the
   personal Mac's VPN switching ([guide](guides/mac_personal.md))
 
@@ -64,11 +71,14 @@
   sha256). Scripts run in place source it relative to themselves; copies installed to
   `/usr/local/bin` with `install_bin` (and the dispatcher) source `/usr/local/lib/homelab/lib.sh`,
   which `install_lib` puts there
-- The container VMs' `install_svcs.sh` also source `src/base/podman/svcs_lib.sh`:
-  `install_traefik_config NODE` and `install_fluentbit_config [CONFIG]`, the config steps every
-  Traefik and Fluent Bit case shares. The case still installs the quadlet and restarts the unit
-- `tools/*.sh` source `tools/lib.sh`, the workstation's `warn`/`die` and `node_inventory` (the
-  inventory files gathered under `nodes:`, shared by the render and the tests)
+- `src/base/podman/install_svcs.sh` installs the shared services (Traefik, CrowdSec AppSec,
+  vmagent, Fluent Bit) on whichever container VM runs it; a node's inventory marks them
+  `shared: true` and the dispatcher runs this script for them. Node-specific pieces stay in the
+  node's dir: each shared quadlet's drop-in (`<quadlet>.container.d/<node>.conf`, with at least its
+  container's `IP=`), Traefik's routes, vmagent's `prometheus.yml`
+- `tools/*.sh` source `tools/lib.sh`, the workstation's `warn`/`die` and `template_vars` (the
+  template data: vars, the inventory files under `nodes:` and `inv:`, shared by the render and the
+  tests)
 - Router (`/bin/sh` on pfSense), gaming and macOS scripts get a copy of their own directory only, so
   they stand alone; `msmtp_password.sh` runs under msmtp with no options set, so it stands alone too
 
@@ -98,12 +108,12 @@ flowchart TB
         allvars["all_vars.yml<br/>private temp dir, deleted after the render"]
         render["render_src.sh: jinjanate every *.j2 in place<br/>(*.j2.j2 survives as *.j2 for the second pass)"]
         validate["check_rendered.py: yamllint, every JSON parses,<br/>duplicate container-IP check,<br/>inventory.yml vs scripts / routes.yml / quadlet Image= / OliveTin"]
-        upload["upload_src.sh per node: scp its src/ paths<br/>(tools/node_dirs.sh) as manualadmin,<br/>sudo mv to /root/homelab-rendered"]
+        upload["upload_src.sh per node: scp its src/ paths<br/>(tools/inventory.py dirs) as manualadmin,<br/>sudo mv to /root/homelab-rendered"]
     end
 
     subgraph node["On the node"]
         dispatch["install_&lt;svc&gt; → dispatcher.sh allowlist<br/>→ install_svcs.sh → quadlets into<br/>/etc/containers/systemd"]
-        second["Container ExecStartPre: render_secrets.sh<br/>renders remaining *.j2 with AGE secrets<br/>(render_host.sh already ran at install)"]
+        second["Container ExecStartPre: render_secrets.sh<br/>renders remaining *.j2 with AGE secrets"]
     end
 
     vars --> allvars
@@ -128,19 +138,21 @@ flowchart TB
 
 Only validated output ever ships, and secrets only materialize inside the node at container start;
 the rendered tree on disk still has secret placeholders in its `*.j2` files. `deploy_src.sh` runs
-render + upload for every node in one command, and archives the repo plus `vars.yml` to pve1
-(`archive_repo`). It always skips the gaming VM and prints the upload command to run once it's
-started. A render from a git checkout writes `DEPLOYED` (commit, uncommitted file count, render
-time) at the tree's root; after each upload the node publishes it as `homelab_deployed_info` and
-`homelab_deployed_timestamp_seconds`, shown per node in the "Deployed commits" table on the Homelab
-alerts dashboard. Nothing alerts on drift.
+render + upload + `install_dispatcher` (`InstallAutomation` on gaming) for every node in one
+command, or only the nodes it's given, and archives the
+repo plus `vars.yml` to pve1 (`archive_repo`) either way. A full deploy skips the gaming VM and
+prints the command to run once it's started. A render from a git checkout writes `DEPLOYED`
+(commit, uncommitted file count, render time) at the tree's root; after each upload the node
+publishes it as `homelab_deployed_info` and `homelab_deployed_timestamp_seconds`, shown per node in
+the "Deployed commits" table on the Homelab alerts dashboard. Nothing alerts on drift.
 
 ## Deploy changes
 
-Render and deploy to all nodes:
+Render and deploy to all nodes, or to the named ones:
 
 ```bash
 tools/deploy_src.sh
+tools/deploy_src.sh websvcs vpnsvcs
 ```
 
 Render templates locally:
@@ -155,23 +167,33 @@ real values, so keep it out of shared paths such as a fixed `/tmp/homelab-render
 `.git`, `planning` and `notes` are never copied into it. The directory must be named
 `homelab-rendered`, since `upload_src.sh` moves it into place by that name.
 
+Rendering starts with `tools/inventory.py` checking each inventory file's shape, every key, its
+value's type and the keys it only makes sense next to (`uptime` without `subdomain`), so a misspelled
+key fails the render instead of being ignored; the shape is the `NODE` table at the top of the
+script.
+
 Rendering ends with `tools/check_rendered.py`, which reports every failure as `error: FILE: MESSAGE`.
-It is a uv script (dependencies inline, run by `uv run`); the inventory facts it checks come from a
-jinjanate render of `src/nodes.jinja`. It lints YAML (`yamllint`), JSON and markdown
-(`.markdownlint-cli2.yaml`: only rules for markdown that renders wrong, broken heading links and the
-100-column line limit), rejects duplicate container `IP=`s, and checks the node inventory, through
-the lists `src/nodes.jinja` derives from it, against the files it describes:
+It is a uv script (dependencies inline, run by `uv run`); the inventory facts it checks are the `inv:`
+lists in the template data. It lints YAML (`yamllint`), JSON and markdown
+(`.markdownlint-cli2.yaml`: every rule, lines up to 100 columns, with exceptions for tabs in
+code, long code and table lines, sibling-only duplicate headings and lists in table cells),
+rejects two containers with the same inventory `ip`, and checks the node inventory, through the lists
+`tools/inventory.py` derives from it, against the files it describes:
 
 - every repo script a dispatcher case runs exists and has the case it is called with (services,
   `debian_services`, `commands[].script` and the paths in `commands[].run`);
-- every `install_svcs.sh` case is in the node's `services`;
+- every `install_svcs.sh` case is in the node's `services`, a shared service's case is in
+  `src/base/podman/install_svcs.sh` and not the node's, and every shared case is shared by some node;
+- every built image (no `upstream`) has its service's `build.sh`;
+- every node that runs `image_updater` has an `image_updater_slot`, and no two share one;
 - subdomains are unique; each is a `Host()` rule in its node's `traefik/routes.yml`, and every
   routed host is listed, except on websvcs, the default route;
-- `upstream` refs name a registry host and namespace, and the quadlet each service's case copies has
-  `Image=localhost/` + the ref without its host, or `Image=localhost/<build>:latest`;
+- the quadlet each service's case copies has `Image=localhost/` + the `upstream` ref without its
+  host, or `Image=localhost/<build>:latest`, and an `IP=` (in the node's drop-in for a shared
+  service) equal to the container's inventory `ip`;
 - the OliveTin config has a button for every dispatcher case except the `pve1_file_transfer` ones,
   none for those, and every `ssh autoadmin@NODE CASE` it runs names a real case;
-- every node and service dir a node uses is among those `tools/node_dirs.sh` ships it: absolute
+- every node and service dir a node uses is among those `tools/inventory.py dirs` ships it: absolute
   and `../` paths in its node and service dirs, and `src/`-relative ones in its node dir,
   dispatcher lines and `debian_services` cases.
 
@@ -193,11 +215,13 @@ nodes' files. The router and gaming VM get only their node dir.
 `.githooks/pre-commit` renders the staged tree against `vars.template.yml` in a temp dir, which runs
 every check above, lints the markdown in `planning/` (never rendered), runs `tests/run.sh --fast`,
 then runs `shellcheck -x --severity=warning` over `tests/*.sh` and the rendered `*.sh` files (so
-`*.sh.j2` scripts are checked with their Jinja filled in). If everything passes it replaces
+`*.sh.j2` scripts are checked with their Jinja filled in) and ruff over the rendered Python. These
+checks are `run_checks` in `tools/lib.sh`. If everything passes it replaces
 `rendered/` with that render and stages it, so every commit carries a readable copy of what the
 nodes get, with example values. `rendered/` is generated: edit the templates, never the copy. It is
 left out of the deploy render and marked `linguist-generated` so GitHub collapses it in diffs. The
-hook takes about 12 s. Activate it once per clone:
+hook takes about 12 s. Activate it once per clone. An absolute path works too: the hook hands off
+to the committing worktree's own copy, so each worktree runs its own branch's hook.
 
 ```bash
 git config core.hooksPath .githooks
@@ -205,6 +229,13 @@ git config core.hooksPath .githooks
 
 Skip it for one commit with `git commit --no-verify`; `rendered/` is then stale until the next
 commit that runs the hook.
+
+Run the same checks on the working tree, uncommitted and untracked files included, without
+touching the index or `rendered/`:
+
+```bash
+tools/check.sh
+```
 
 ### Tests
 
@@ -220,11 +251,17 @@ repo root, in parallel; helpers shared by the suites are in `tests/lib.sh`. Plai
 - `check_rendered_test.sh`: `tools/check_rendered.py` on `tests/fixtures/tree`, a minimal rendered
   tree in the repo's layout (`src/nodes/<node>/inventory.yml` and all) that passes; each test breaks
   one invariant and expects that invariant's error alone.
-- `nodes_jinja_test.sh`: the dispatcher cases, sudoers grants, OliveTin buttons, subdomains, uptime
-  endpoints and image update order `src/nodes.jinja` derives from `tests/fixtures/nodes/`, written
-  out from ADR 0006.
+- `inventory_test.sh`: the dispatcher cases, sudoers grants, OliveTin buttons, subdomains, uptime
+  endpoints and image update order `tools/inventory.py` derives from `tests/fixtures/nodes/`, written
+  out from ADR 0006; and the shape errors it reports for a misspelled, mistyped or lone key.
 - `image_updater_test.sh`: the image updater's config, `src/base/podman/image_updater.json.j2`,
   from a fixture inventory.
+- `net_probe_test.sh`: the net_probe config, `src/base/net_probe/config.json.j2`: its targets,
+  test order, slots and busy thresholds.
+- `vm_watchdog_test.sh`: `src/base/vm_watchdog/vm_watchdog.py` against the reset rules in
+  [Services](services.md).
+- `vars_test.sh`: `vars.template.yml` and `vars.yml` (when present) have the same top-level keys,
+  and `render_src.sh` explains a missing vars file or a missing closing `...`.
 - `render_test.sh`: a full render of `vars.template.yml` passes every check (skipped by `--fast`,
   since the pre-commit hook renders anyway).
 
@@ -252,7 +289,8 @@ sudo /root/homelab-rendered/src/nodes/secsvcs/install_svcs.sh SERVICE
 1. Add a case for it to `install_svcs.sh`, ending with `reload_restart <unit>`
 1. Add it under `services` in `src/nodes/<node>/inventory.yml`, in install order, with its
    `subdomain` and, to monitor it in Gatus, `uptime` (plus `uptime_path` if the health check isn't
-   `/`, `uptime_tier: 1` for a 2-minute check, `uptime_conditions` for extra Gatus conditions) and
+   `/`, `uptime_tier: 1` for a 2-minute check, `uptime_conditions` for extra Gatus conditions,
+   `uptime_oauth: false` when the path has no ForwardAuth and the app rejects a foreign token) and
    its image (`upstream: <full ref>` or `build: <name>`; `update_last: true` for the notification
    path on secsvcs), and `admin: true` for an admin tool that needs two factors from every network.
    This adds the dispatcher case, sudoers grant, OliveTin button, DNS/SNI

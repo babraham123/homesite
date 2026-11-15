@@ -15,7 +15,7 @@ cd /root/homelab-rendered
 src/nodes/secsvcs/install_svcs.sh postgres
 src/nodes/secsvcs/install_svcs.sh lldap
 src/nodes/secsvcs/install_svcs.sh authelia
-src/nodes/secsvcs/install_svcs.sh traefik
+src/base/podman/install_svcs.sh traefik
 src/nodes/secsvcs/install_svcs.sh victoriametrics
 src/nodes/secsvcs/install_svcs.sh victorialogs
 src/nodes/secsvcs/install_svcs.sh gatus
@@ -29,8 +29,8 @@ src/nodes/secsvcs/install_svcs.sh vaultwarden
 src/nodes/secsvcs/install_svcs.sh olive_tin
 # needs the prerequisites in CrowdSec below
 src/nodes/secsvcs/install_svcs.sh crowdsec
-src/nodes/secsvcs/install_svcs.sh crowdsec_appsec
-src/nodes/secsvcs/install_svcs.sh fluentbit
+src/base/podman/install_svcs.sh crowdsec_appsec
+src/base/podman/install_svcs.sh fluentbit
 
 systemctl restart mdns_repeater
 systemctl list-units | grep Homelab
@@ -51,6 +51,14 @@ ufw allow in from 192.168.2.20 to any port 5432,6360,9091,465 proto tcp
 # Published ports are DNATed, so the route rules admit the traffic
 ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.4.21 to any port 5432,6360,9091,465 proto tcp
 ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.2.20 to any port 5432,6360,9091,465 proto tcp
+```
+
+- Admit pfSense's syslog to VictoriaLogs, from the router's address on this subnet
+  ([router guide](./router.md#remote-logging))
+
+```bash
+ufw allow in from 192.168.4.1 to any port 5140 proto udp
+ufw route allow in on $NET_IFACE out on $POD_IFACE from 192.168.4.1 to any port 5140 proto udp
 ```
 
 - Confirm that the logs for traefik, authelia and lldap look good
@@ -75,7 +83,7 @@ journalctl -eu authelia
   - Create the `grafana_admin`, `hass_admin`, `command_admin` and `files_admin` groups, add your
     user to them
   - Restore the authelia middleware
-    `/root/homelab-rendered/src/nodes/secsvcs/install_svcs.sh traefik`
+    `/root/homelab-rendered/src/base/podman/install_svcs.sh traefik`
 
 - Confirm that authelia is working, open <https://auth.janedoe.com>
 
@@ -108,7 +116,7 @@ src/nodes/secsvcs/install_svcs.sh crowdsec
 podman exec crowdsec cscli lapi status
 podman exec crowdsec cscli capi status          # registered, blocklist pulled
 podman exec crowdsec cscli metrics show acquisition parsers   # traefik and authelia lines parsed
-src/nodes/secsvcs/install_svcs.sh fluentbit     # ship the new unit's journal
+src/base/podman/install_svcs.sh fluentbit     # ship the new unit's journal
 ```
 
 - New online API identity: delete `/etc/opt/crowdsec/config/online_api_credentials.yaml` and the
@@ -152,11 +160,12 @@ request.
    ```bash
    src/nodes/secsvcs/install_svcs.sh crowdsec
    podman exec crowdsec cscli bouncers list    # vpnsvcs, and traefik_<node> for all three
-   src/nodes/secsvcs/install_svcs.sh crowdsec_appsec
-   src/nodes/secsvcs/install_svcs.sh traefik
+   src/base/podman/install_svcs.sh crowdsec_appsec
+   src/base/podman/install_svcs.sh traefik
    ```
 
-3. On homesvcs and websvcs: `install_svcs.sh crowdsec_appsec`, then `install_svcs.sh traefik`
+3. On homesvcs and websvcs: `src/base/podman/install_svcs.sh crowdsec_appsec`, then
+   `src/base/podman/install_svcs.sh traefik`
 4. Check, on secsvcs
 
    ```bash
@@ -166,15 +175,17 @@ request.
    journalctl -u traefik | grep -i crowdsec   # no plugin errors
    ```
 
-- Test from an outside IP: expect a 403 and an alert in `cscli alerts list`. From the LAN: blocked,
-  never banned
+- Test from an outside IP: expect a 403 from the `vpatch-env-access` virtual patch and an alert in
+  `cscli alerts list`. From the LAN: a 200 and the same alert, never a ban. One request alerts
+  without a ban; the `appsec-vpatch` scenario bans after more
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' 'https://www.janedoe.com/?q=<script>alert(1)</script>'
+curl -s -o /dev/null -w '%{http_code}\n' https://www.janedoe.com/.env
 ```
 
-- The Core Rule Set only alerts (scenarios `anomaly score*`). Add exclusions for false positives,
-  then move it in-band
+- The Core Rule Set blocks without a ban: from an outside IP, an XSS probe such as
+  `?q=<script>alert(1)</script>` gets a 403 and an `xss` alert; from the LAN, a 200 and the alert.
+  Review the LAN's alerts for false positives and add rule exclusions for them
 
 ## Vaultwarden
 
@@ -195,7 +206,7 @@ src/nodes/secsvcs/install_svcs.sh authelia
 sed -n '/Vaultwarden DB/,/CREATE DATABASE vaultwarden/p' /var/opt/db/pg_init.sql \
   | podman exec -i postgres psql -U postgres -v ON_ERROR_STOP=1
 src/nodes/secsvcs/install_svcs.sh vaultwarden
-src/nodes/secsvcs/install_svcs.sh traefik
+src/base/podman/install_svcs.sh traefik
 curl -fsS https://vault.janedoe.com/alive
 ```
 
@@ -242,7 +253,7 @@ sudo su
 cd /root/homelab-rendered
 src/nodes/secsvcs/install_svcs.sh ntfy
 src/nodes/secsvcs/install_svcs.sh ntfy_idp_push
-src/nodes/secsvcs/install_svcs.sh traefik
+src/base/podman/install_svcs.sh traefik
 curl -fsS https://idp-push.janedoe.com/healthz
 podman exec ntfy_idp_push ntfy-idp-push user list
 ```
@@ -272,11 +283,10 @@ against its sha256; `src/base/net_probe/config.json.j2` has the targets, slots a
 
 - Set `isp.down_mbps` and `isp.up_mbps` in `vars.yml` to the plan's advertised speeds, then
   `tools/deploy_src.sh`
-- The iperf3 servers. On websvcs:
+- The iperf3 servers. On websvcs (`install_network.sh` opened 5201 to secsvcs):
 
 ```bash
 ssh autoadmin@websvcs install_iperf3_server
-ssh -t manualadmin@websvcs sudo ufw allow in from 192.168.4.20 to any port 5201 proto tcp
 ```
 
 - On the VPS: `ssh autoadmin@vpnsvcs install_iperf3_server`, the 5201 rule from
@@ -325,7 +335,7 @@ systemctl --type=service
 - From 14: hand each database to its app's role first, so the dump carries the owners
 
 ```bash
-for db in lldap authelia gatus grafana guacamole; do
+for db in lldap authelia gatus grafana; do
   podman exec postgres psql -U postgres -c "ALTER DATABASE $db OWNER TO $db"
 done
 ```
@@ -340,7 +350,8 @@ systemctl list-units | grep Homelab
 systemctl stop ALL_OTHER_SERVICES
 container=$(podman container ls | grep postgres | awk '{print $1}')
 now=$(date -I)
-podman exec -it --user 70 "$container" pg_dumpall -U postgres --clean --if-exists > pgdump-$now.sql
+# No -t: a terminal would turn the dump's line endings into CRLF
+podman exec --user 70 "$container" pg_dumpall -U postgres --clean --if-exists > pgdump-$now.sql
 gzip *.sql
 systemctl stop postgres
 ```
@@ -352,7 +363,7 @@ cd /root/backups
 /root/homelab-rendered/src/nodes/secsvcs/install_svcs.sh postgres
 gunzip FILE.sql.gz
 container=$(podman container ls | grep postgres | awk '{print $1}')
-podman exec -it --user 70 "$container" psql -U postgres < FILE.sql
+podman exec -i --user 70 "$container" psql -U postgres < FILE.sql
 systemctl start ALL_OTHER_SERVICES
 ```
 

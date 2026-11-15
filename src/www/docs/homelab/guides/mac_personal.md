@@ -53,8 +53,9 @@ wget -O .vimrc https://raw.githubusercontent.com/amix/vimrc/master/vimrcs/basic.
 
 ```bash
 brew install fd yq yamllint jq shellcheck markdownlint-cli2 uv
-pipx install jinjanator
-pipx inject jinjanator jinjanator-plugin-ansible passlib "bcrypt==4.0.1"
+# Same versions as CI (.github/workflows/ci.yml)
+uv tool install jinjanator --with jinjanator-plugin-ansible==26.1.0 \
+  --with passlib==1.7.4 --with bcrypt==4.0.1
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
@@ -67,13 +68,16 @@ cd homelab
 git config core.hooksPath .githooks
 # Fill in personal details based on vars.template.yml
 vim vars.yml
-tools/render_src.sh /tmp/homelab-rendered
+# A private dir: the output holds real values
+out=$(mktemp -d)/homelab-rendered
+tools/render_src.sh "$out"
 
-cd /tmp/homelab-rendered/src
+cd "$out/src"
 cp base/debian/aliases.zsh ~/.oh-my-zsh/custom
 cp base/debian/functions.zsh ~/.oh-my-zsh/custom
 cp base/debian/ssh_config ~/.ssh/config
 chmod 600 ~/.ssh/config
+cd ~/Documents/homelab && rm -rf "$(dirname "$out")"
 ```
 
 ## Auto-switch DNS

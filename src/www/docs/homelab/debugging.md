@@ -57,7 +57,7 @@ qm guest exec VMID -- bash -c 'systemctl --failed'
 
 # Rescue a VM that's thrashing: stop every Homelab service
 qm guest exec VMID -- bash -c \
-  'systemctl list-units | grep Homelab | grep -o "[a-z0-9_]*.service" | xargs systemctl stop'
+  'systemctl list-units --plain --no-legend | awk "/Homelab/ {print \$1}" | xargs systemctl stop'
 ```
 
 ### VM fails to start
@@ -128,10 +128,10 @@ cd -
 podman run --rm -v "$PWD"/services/vmalert/configs:/etc/alerts:ro \
   localhost/victoriametrics/vmalert:latest -rule='/etc/alerts/*.yml' -dryRun
 
-# Alertmanager: the unit's ExecStartPre renders secrets into the installed file, so check that
-# one after a restart
-podman run --rm -v /etc/opt/alertmanager:/config:ro --entrypoint amtool \
-  localhost/prom/alertmanager:latest check-config /config/config.yml
+# Alertmanager: config.yml is installed as is (its secrets are *_file paths); ExecStartPre
+# renders only web_config.yml. The image has no tz database for time_intervals' location.
+podman run --rm -v /etc/opt/alertmanager:/config:ro -v /usr/share/zoneinfo:/usr/share/zoneinfo:ro \
+  --entrypoint amtool localhost/prom/alertmanager:latest check-config /config/config.yml
 ```
 
 Traefik, ntfy-alertmanager and Gatus have no offline check, so restart them and look:
@@ -195,7 +195,7 @@ podman images --filter reference='localhost/*'
 ```
 
 Building an image inside a quadlet: see
-[podman#22694](https://github.com/containers/podman/pull/22694).
+[podman#22694](https://github.com/podman-container-tools/podman/pull/22694).
 
 ### Known issues
 
@@ -439,9 +439,10 @@ echo "show stat" | socat stdio /run/haproxy/admin.sock | cut -d, -f1,2,18
 echo "show table" | socat stdio /run/haproxy/admin.sock   # rate-limit / ban tables
 ```
 
-HAProxy routes on SNI without terminating TLS. Each :443 connection logs one line when it closes,
-ending in `up=<bytes> down=<bytes> sni=<name>` (`journalctl -u haproxy | grep sni=`); an SNI with
-characters outside `[a-z0-9.-]` logs as `-`. To see exactly what SNI a client sends, capture
+HAProxy routes on SNI without terminating TLS. A :443 connection that ends in an error, timeout or
+retry logs one line when it closes, ending in `up=<bytes> down=<bytes> sni=<name>` (`journalctl -u
+haproxy | grep sni=`); normal ones aren't logged (`option dontlog-normal`). An SNI with characters
+outside `[A-Za-z0-9.-]` logs as `-`. To see exactly what SNI a client sends, capture
 ClientHello packets and open the file in Wireshark:
 
 ```bash
@@ -589,19 +590,20 @@ LLDAP has [sample client configs](https://github.com/lldap/lldap#sample-client-c
 When a client (e.g. Gatus using client-credentials) fails against Authelia's token endpoint and logs
 aren't enough, capture and decrypt the traffic. Modern TLS uses forward secrecy, so the server key
 alone can't decrypt it; the client must export session keys via `SSLKEYLOGFILE`.
-`probes/oauth.go.j2` is a minimal Go client that does this.
+`probes/oauth.go.j2` is a minimal Go client that does this. On secsvcs as root, where the Gatus
+secrets are; traffic to Authelia stays on the host, so capture on every interface:
 
 ```bash
 # Build and run the test client
 go mod init oauth && go get golang.org/x/oauth2 golang.org/x/oauth2/clientcredentials
 go build -o oauth
-tcpdump -i vmbr0 host 12.34.56.78 -w capture.pcap &
+tcpdump -i any tcp port 443 -w capture.pcap &
 CLIENT_ID="$(/root/homelab-rendered/src/base/podman/get_secret.sh gatus_oidc_id)" CLIENT_SECRET="$(/root/homelab-rendered/src/base/podman/get_secret.sh gatus_oidc_secret)" ./oauth
 kill %1
 
 # Decrypt with the exported keys
 apt install -y tshark
-tshark -o tls.keylog_file:ssl_key.log -r capture.pcap -V -R "http.request || http.response"
+tshark -o tls.keylog_file:ssl_key.log -r capture.pcap -V -Y "http.request || http.response"
 ```
 
 To reproduce with Gatus itself, build it from source and run with
@@ -610,23 +612,24 @@ To reproduce with Gatus itself, build it from source and run with
 
 ### Run Authelia outside a container
 
-Useful to iterate on `configuration.yml` quickly. Download a release binary, write each secret to a
-file, and point the `*_FILE` env vars at them:
+Useful to iterate on `configuration.yml` quickly. On secsvcs as root, with a release binary in a
+scratch directory and `systemctl stop authelia` first (same port). The config is a Go template
+that reads the OIDC ids and hashes with `mustEnv`, so every quadlet `Secret=` becomes a plain env
+var, and it reads keys from the hard-coded `/certificates/`:
 
 ```bash
-/root/homelab-rendered/src/base/podman/get_secret.sh authelia_jwt_secret | head -c -1 > authelia_jwt_secret
-# ...one file per secret below; edit certificates_directory in configuration.yml
-AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=authelia_jwt_secret \
-AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE=lldap_admin_password \
-AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=authelia_storage_key \
-AUTHELIA_STORAGE_POSTGRES_PASSWORD_FILE=authelia_pg_password \
-AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=authelia_smtp_password \
-AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET_FILE=oidc_hmac_secret \
+while IFS=, read -r name _ target; do
+  export "${target#target=}=$(/root/homelab-rendered/src/base/podman/get_secret.sh "${name#Secret=}")"
+done < <(grep '^Secret=' /etc/containers/systemd/authelia.container)
+ln -sfn /etc/opt/authelia/certificates /certificates
+X_AUTHELIA_CONFIG_FILTERS=template \
+AUTHELIA_NOTIFIER_SMTP_TLS_PRIVATE_KEY_FILE=/certificates/auth.key \
+AUTHELIA_NOTIFIER_SMTP_TLS_CERTIFICATE_CHAIN_FILE=/certificates/auth.cert.pem \
 AUTHELIA_SERVER_DISABLE_HEALTHCHECK=true \
-  ./authelia-linux-amd64 --config configuration.yml
+  ./authelia-linux-amd64 --config /etc/opt/authelia/config/configuration.yml
+# Done: drop the link, restart the container, then exit this shell, which holds the secrets
+rm /certificates; systemctl start authelia
 ```
-
-Match the env var list to the `Secret=` lines in `src/services/authelia/authelia.container.j2`.
 
 ## Databases
 
@@ -653,6 +656,8 @@ systemctl start postgres
 
 ## Observability
 
+Example PromQL and LogsQL, and the labels and log fields they use: [queries](queries.md).
+
 | Endpoint | What |
 | ---------- | ------ |
 | `metrics.janedoe.com/targets` | secsvcs scrape targets and their errors |
@@ -663,8 +668,9 @@ systemctl start postgres
 | `uptime.janedoe.com` | Gatus checks |
 | `SERVICE:PORT/metrics` | Raw metrics from a service (e.g. `victoriametrics:8428`, `vmalert:8880`) |
 
-Metrics and logs require basic auth (`admin` + `victoriametrics_admin_password` /
-`victorialogs_admin_password`).
+A browser reaches metrics and logs through Authelia; anything else (curl, scripts) uses basic
+auth (`admin` + `victoriametrics_admin_password` / `victorialogs_admin_password`), and only from
+home and tailnet addresses.
 
 ```bash
 VM_AUTH="admin:$(/root/homelab-rendered/src/base/podman/get_secret.sh victoriametrics_admin_password)"
@@ -702,15 +708,15 @@ curl -s -u ":TOKEN" https://push.janedoe.com/TOPIC/json
 curl -u ":TOKEN" -d "hello" https://push.janedoe.com/TOPIC
 ```
 
-ntfy also accepts email-to-topic over SMTP. `probes/email.txt.j2` is a raw SMTP session. Traefik
-exposes it only as SMTPS on 465; plain SMTP on port 25 is reachable only from `systemd-net` on
-secsvcs:
+ntfy also accepts email-to-topic over SMTP. `rendered/probes/email.txt` is a raw SMTP session;
+SMTP ends lines with CRLF, so the commands send it with `-crlf` / `-C`. Traefik exposes it only as
+SMTPS on 465; plain SMTP on port 25 is reachable only from `systemd-net` on secsvcs:
 
 ```bash
-openssl s_client -connect push.janedoe.com:465 -quiet < probes/email.txt
+openssl s_client -connect push.janedoe.com:465 -quiet -crlf < rendered/probes/email.txt
 # Plain SMTP, from secsvcs
 podman run -i --rm --net systemd-net docker.io/nicolaka/netshoot:latest \
-  nc ntfy 25 < probes/email.txt
+  nc -C ntfy 25 < rendered/probes/email.txt
 ```
 
 Test outbound mail (used by cert_notifier and other alerts). msmtp is configured only on pve1 and
@@ -750,6 +756,18 @@ vi /cf/conf/config.xml
 rm /tmp/config.cache
 ```
 
+### Serial console
+
+pve1 reaches the network only through the router, so when pfSense is down or stuck at a prompt,
+the web UI (and its VM console) is out of reach too. The router's serial port, set up per the
+[router guide](guides/router.md#serial-console), gives a pfSense console from pve1's local
+keyboard and monitor:
+
+```bash
+# On pve1's local console as root
+qm terminal VMID   # Enter for the menu; exit with Ctrl+O
+```
+
 ### Decrypt a config backup
 
 Encrypted backups (e.g. from Auto Config Backup) are base64-wrapped AES:
@@ -767,14 +785,15 @@ Key Proxmox settings if the router VM has to be rebuilt:
 | Setting | Value |
 | --------- | ------- |
 | OS type | Linux 6.x |
-| Firmware / machine | SeaBIOS, i440fx |
+| Firmware / machine | SeaBIOS, q35 (NIC passthrough on PCIe ports; see the [router guide](guides/router.md#q35-machine-type)) |
 | CPU | 2 cores, type `host` |
-| Memory | 12 GiB, ballooning off (required for PCI passthrough) |
+| Memory | 12 GiB; the balloon device stays at its default, no minimum, so it never reclaims (PCI passthrough pins guest RAM anyway) |
 | Disk | VirtIO SCSI single, discard on, IO thread, SSD emulation, no cache |
-| Boot order | `scsi0`, `ide2` |
+| Boot order | `scsi0`, `net0` (`ide2` holds the install ISO until pfSense is installed) |
 | Startup order | 1 (boots before everything else) |
 | Network | None at creation; after install attach `vmbr0` (VirtIO, firewall on) to share connectivity with the PVE host; keep the old MAC so DHCP reservations hold |
-| PCI devices | NIC ports passed through as `hostpci0`–`hostpci3`, in port order |
+| PCI devices | NIC ports passed through as `hostpci0`–`hostpci3`, in port order, `pcie=1` |
+| Serial port | `serial0: socket`, for [`qm terminal`](#serial-console) |
 
 ## Host administration
 

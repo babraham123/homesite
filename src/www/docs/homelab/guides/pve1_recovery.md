@@ -34,7 +34,7 @@ Recover pve1 after a dead SSD or a lost trust root (AGE key, private CA, SSH CA,
 | `/root/acme/` | Traefik certs, `date_acme_certs.txt` | Regenerate | `acme_transfer.sh` |
 | `/root/.ssh/id_ed25519`, `id_ed25519-cert.pub` | root's client key | Regenerate | [step 10](#10-ssh-root-key-and-host-certs) |
 | `/etc/pve/storage.cfg`, `/etc/pve/priv/storage/pbs2.*` | `pbs2` storage, token, key | PBS host backup | [step 3](#3-reconnect-the-pbs-storage) |
-| `/etc/pve/user.cfg`, `qemu-server/*.conf` | `api_ro` user, VM configs | PBS host backup, PBS VM backup | `qmrestore`; users per the [Proxmox guide](./proxmox.md#backups) |
+| `/etc/pve/qemu-server/*.conf` | VM configs | PBS host backup, PBS VM backup | `qmrestore` |
 | `/etc/network/interfaces`, `/etc/resolv.conf` | host network | Regenerate | `src/nodes/pve1/interfaces.j2`, `resolv.conf.j2` |
 | `/root/homelab-rendered/` | rendered repo | Regenerate | `tools/deploy_src.sh` |
 | `/etc/msmtprc`, host scripts and units, AppArmor edit, node_exporter | host services | Regenerate | [step 11](#11-host-services) |
@@ -75,8 +75,9 @@ Recover pve1 after a dead SSD or a lost trust root (AGE key, private CA, SSH CA,
 
 ### 3. Reconnect the PBS storage
 
-- Key: escrow or pve2's `/etc/pve/priv/storage/pbs2.enc` → `install -D -m 400` to
-  `/root/secrets/pbs_client.key`
+- Key: escrow or pve2's `/etc/pve/priv/storage/pbs2.enc` → `install -m 400` to
+  `/root/pbs_client.key`. Not `/root/secrets/` yet: `init_secrets.sh` (step 8) refuses to run once
+  that exists
 - Token: `pbs2_backup_token` from escrow, or a new one ([Proxmox guide](./proxmox.md#backups))
 
 ```bash
@@ -86,7 +87,7 @@ proxmox-backup-manager cert info | grep Fingerprint
 # On pve1
 pvesm add pbs pbs2 --server 192.168.2.10 --datastore backup1 --namespace pve1 \
   --username 'pve1@pbs!backup' --password 'TOKEN_SECRET' --fingerprint 'FINGERPRINT' \
-  --encryption-key /root/secrets/pbs_client.key
+  --encryption-key /root/pbs_client.key
 pvesm list pbs2
 ```
 
@@ -142,7 +143,8 @@ ssh-keygen -R pve1; ssh-keygen -R pve1.janedoe.com; ssh-keygen -R 192.168.4.10
 tools/deploy_src.sh
 ```
 
-- Check the output for `pve1 upload failed`
+- Check the output for `pve1 upload failed`. `pve1 repo archive failed` and `pve1
+  install_dispatcher failed` are expected: pve1 has no `autoadmin` yet (next step)
 - On pve1:
   - [Debian setup, Automation](./debian.md#automation): `autoadmin`, `install_dispatcher`
   - [pve1 guide, Configs](./pve1.md#configs)
@@ -150,22 +152,28 @@ tools/deploy_src.sh
 
 ### 9. Restore the trust roots
 
-- From PBS ([restore guide](./restore.md#from-pbs)), then copy `pve1/files/root/{secrets,ca,ssh,acme,.ssh}`
-  into place:
+- From PBS, then copy `pve1/files/root/{secrets,ca,ssh,acme,.ssh}` into place. The [restore
+  guide](./restore.md#from-pbs)'s token comes from pve1's secrets, which this step restores, so set
+  it by hand from step 3:
 
 ```bash
 /root/homelab-rendered/src/nodes/pve1/install_svcs.sh backup_orchestrator
+export PBS_REPOSITORY='pve1@pbs!backup@pbs2.janedoe.com:backup1'
+export PBS_PASSWORD='TOKEN_SECRET'
 proxmox-backup-client restore host/pve1/TIMESTAMP backups.pxar /tmp/restore --ns files \
-  --keyfile /root/secrets/pbs_client.key --pattern 'pve1/*'
+  --keyfile /root/pbs_client.key --pattern 'pve1/*'
+unset PBS_PASSWORD
 ```
 
 - Or from escrow, at the paths in [On pve1](#on-pve1)
 - Neither: [Nothing escrowed](#nothing-escrowed)
-- Permissions:
+- Permissions, with the PBS key from step 3 moved in:
 
 ```bash
+mv /root/pbs_client.key /root/secrets/
 chmod 700 /root/secrets /root/ca/private /root/ca/intermediate/private /root/ssh/public
-chmod 400 /root/secrets/age.* /root/secrets/*.yaml.age /root/secrets/*_id_ed25519.pub
+chmod 400 /root/secrets/age.* /root/secrets/*.yaml.age /root/secrets/*_id_ed25519.pub \
+  /root/secrets/pbs_client.key
 chmod 400 /root/ca/private/ca.key.pem /root/ca/intermediate/private/*.key.pem
 chmod 400 /root/ssh/ca_ssh_key /root/ssh/ca_ssh_host_key
 ```
@@ -174,8 +182,12 @@ chmod 400 /root/ssh/ca_ssh_key /root/ssh/ca_ssh_host_key
 
 ```bash
 sudo su
+# pve1's own sshd trusts the CA again, so ssh_cert_gen.sh can log in to pve1
+tee -a /etc/ssh/ca_ssh_key.pub < /root/ssh/ca_ssh_key.pub > /dev/null
+systemctl restart ssh
+# Step 9 restored root's key; a new one only if it didn't
+[[ -f /root/.ssh/id_ed25519 ]] || ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N ""
 # Asks for the ca_ssh_key passphrase
-ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N ""
 ssh-keygen -s /root/ssh/ca_ssh_key -I pve1 -n manualadmin,autoadmin -V +395d /root/.ssh/id_ed25519.pub
 echo "@cert-authority *.janedoe.com $(cat /root/ssh/ca_ssh_host_key.pub)" > /etc/ssh/ssh_known_hosts
 # Needs pve2, vpnsvcs, websvcs, devtop and router up
@@ -193,8 +205,8 @@ cd /root/ca
 
 - [pve1 guide, ACME Certificates](./pve1.md#acme-certificates): `traefik-certs-dumper`,
   `mkdir -p /root/acme`
-- [pve1 guide, Notifications](./pve1.md#notifications): msmtp, AppArmor, `cert_notifier`; skip the
-  Gmail account
+- [pve1 guide, Notifications](./pve1.md#notifications): msmtp, AppArmor, `cert_notifier`,
+  `ct_watch`; skip the Gmail account
 - [Proxmox guide](./proxmox.md): VM management, Networking, Monitoring
 
 ### 12. Certificates
@@ -210,7 +222,8 @@ cd /root/ca
   - Login at `https://auth.janedoe.com`
   - `ssh manualadmin@pve1` from the workstation, no host-key prompt
   - `pvesm status` shows `pbs2` active
-  - `systemctl status cert_notifier.timer vm_watchdog node_exporter backup_orchestrator.timer --no-pager`
+  - `systemctl status cert_notifier.timer ct_watch.timer vm_watchdog node_exporter
+    backup_orchestrator.timer --no-pager`
 - Power off pve2: `ssh autoadmin@pve2 shutdown`
 
 ### Router without a VM backup
@@ -268,7 +281,6 @@ qm guest exec VMID -- age -d -i /etc/opt/secrets/id_ed25519 /etc/opt/secrets/sec
   `/root/homelab-rendered/src/nodes/pve1/secret_update.sh pve1` from
   `src/nodes/pve1/secrets_template.yaml`:
   - a new Gmail app password ([Notifications](./pve1.md#notifications))
-  - a new `api_ro` password on PBS ([Proxmox guide, Monitoring](./proxmox.md#monitoring))
   - a new PBS token ([Proxmox guide, Backups](./proxmox.md#backups))
   - MaxMind keys from the MaxMind account
 - `rm -rf /root/secrets/lost`
@@ -291,7 +303,8 @@ qm guest exec VMID -- age -d -i /etc/opt/secrets/id_ed25519 /etc/opt/secrets/sec
 ### Only the SSH CA is lost
 
 - Existing certs work until they expire
-- New CA keys with a new `ca_ssh_key` passphrase ([CA certs](./pve1.md#ca-certs))
+- A new user CA with a new passphrase: `init_ssh_ca.sh` ([CA certs](./pve1.md#ca-certs)) creates
+  only the keys that are missing, so the host CA and root's key stay
 - Re-sign everything, then the gaming VM:
 
 ```bash
@@ -301,15 +314,15 @@ ssh autoadmin@pve2 start_gaming_vm
 /root/homelab-rendered/src/nodes/pve1/certificates/ssh_cert_gen_windows.sh
 ```
 
-- Replace the `@cert-authority` line in `~/.ssh/known_hosts` on each client with the one the script
-  prints
+- If the host CA (`ca_ssh_host_key`) was lost too, replace the `@cert-authority` line in
+  `~/.ssh/known_hosts` on each client with the one the script prints
 
 ### Only vars.yml is lost
 
 - Take it from the newest `/root/backups/repo/homelab-*.tar.gz` on pve1, the PBS host backup, or
   escrow
-- Otherwise diff a template render against a host's `/root/homelab-rendered`; repeat for pve1 and
-  each container VM:
+- Otherwise diff a template render against a host's `/root/homelab-rendered`, which holds only
+  that host's files; repeat for pve1 and each container VM:
 
 ```bash
 # On the workstation, repo root, at the last deployed commit
@@ -320,10 +333,11 @@ ssh -t manualadmin@pve1 'sudo tar -C /root -czf /tmp/homelab-rendered.tgz homela
 scp manualadmin@pve1:/tmp/homelab-rendered.tgz "$work/"
 ssh manualadmin@pve1 'rm /tmp/homelab-rendered.tgz'
 tar -C "$work" -xzf "$work/homelab-rendered.tgz"
-diff -r "$work/homelab-template" "$work/homelab-rendered"
+# Only the files the host has; DEPLOYED (the commit and time) always differs
+(cd "$work/homelab-rendered" && find . -type f ! -name DEPLOYED -exec diff -u "$work/homelab-template/{}" {} \;)
 ```
 
-- Edit `vars.yml` until the `diff` is empty, then `rm -rf "$work"`
+- Edit `vars.yml` and re-render until that prints nothing, then `rm -rf "$work"`
 
 ### Nothing escrowed
 

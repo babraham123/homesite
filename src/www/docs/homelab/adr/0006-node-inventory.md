@@ -14,6 +14,26 @@ Amended: the cross-checks live in `tools/check_rendered.py` and also cover the s
 `commands[].run`, websvcs subdomains (each must be routed; only unlisted routes are allowed there)
 and the OliveTin buttons (one per dispatcher case, none for a missing case).
 
+Amended: services also carry `ip`, their container's host number, and `src/nodes.jinja` outputs
+`addr`, each node's container addresses. Quadlets stay hand-written but take `IP=` from `addr`, as
+does every config that names another container; the render checks the addresses are unique per
+node and match each quadlet's `IP=`.
+
+Amended: the derivation is `tools/inventory.py`, a uv script, in place of the Jinja macro file
+`src/nodes.jinja`, which had grown into a program written in `{% do %}` statements and read
+per-node vars through a private Jinja attribute. `tools/lib.sh`'s `template_vars` adds its output
+to the template data as `inv:`, so templates read `inv.<name>` without an import, and
+`check_rendered.py` reads the same lists. Its `dirs` subcommand replaces `tools/node_dirs.sh`, so the
+debian-node test lives in one place. The key reference is in `tools/inventory.py`.
+
+Amended: `tools/inventory.py` checks each file against a declared shape (its `NODE` table: the
+allowed keys, each value's type and the keys that only make sense together) before deriving
+anything, so a misspelled or mistyped key fails the render rather than being read as absent. The
+per-key format checks `check_rendered.py` had (`ip` range, `upstream` ref, `image_updater_slot`
+format) moved there; the cross-file checks stay. A CUE schema was prototyped for the same job and
+rejected: it would add a binary to the laptop and CI for checks a page of Python expresses, and the
+file format gains nothing.
+
 ## Context
 
 Four scripts reverse-engineered template variables from other files at render time:
@@ -34,7 +54,7 @@ inferred, per node:
   whose key order is the install order, so a service can carry attributes; today those are
   `subdomain`, `uptime` (the Gatus endpoint name), `uptime_path`, `uptime_tier` and
   `uptime_conditions`.
-- `install_all_svcs: true` on the container VMs only.
+- `install_all_svcs: true` on the container VMs, `install_some_svcs: [names]` on vpnsvcs.
 - `dirs` per service: the `src/` dirs `upload_src.sh` ships to the node besides `src/base/` and
   its own node dir (`tools/node_dirs.sh`), so each node holds only the services it runs.
 - `triggers` for the gaming VM's PowerShell allowlist.
@@ -61,7 +81,8 @@ Hand-written files stay the source for everything else: `routes.yml`, quadlets, 
   render fails.
 - Adding a service means one `install_svcs.sh` case plus one `inventory.yml` line; a route on
   secsvcs/homesvcs also needs its `subdomain`.
-- Dispatcher case order is canonical: debian services, services, `install_all_svcs`, then commands.
+- Dispatcher case order is canonical: debian services, services, `install_all_svcs` or
+  `install_some_svcs`, commands, then `triggers`.
   OliveTin button order follows it.
 - Later per-service facts go on the service entry rather than into a new parser: image facts for the
   image updater (upstream/build, update-last, extra quadlets) and the source directories for

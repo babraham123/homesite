@@ -4,18 +4,6 @@ Guide to setup websvcs on PVE2. Just service installation.
 
 - Setup [Podman](./podman.md)
 
-## Initialize Guacamole DB
-
-- Create the tables, [ref](https://guacamole.apache.org/doc/gug/postgresql-auth.html)
-
-```bash
-ssh manualadmin@secsvcs
-sudo /root/homelab-rendered/src/nodes/secsvcs/init_guacamole_db.sh
-exit
-```
-
-- Remember to handle any subsequent upgrades
-
 ## Setup containers
 
 - Install and start containers. Each install loads its images through the
@@ -24,15 +12,15 @@ exit
 ```bash
 cd /root/homelab-rendered
 # Needs the bouncer key and WAF cert: secsvcs guide, Traefik WAF
-src/nodes/websvcs/install_svcs.sh traefik
-src/nodes/websvcs/install_svcs.sh crowdsec_appsec
-src/nodes/websvcs/install_svcs.sh vmagent
+src/base/podman/install_svcs.sh traefik
+src/base/podman/install_svcs.sh crowdsec_appsec
+src/base/podman/install_svcs.sh vmagent
 src/nodes/websvcs/install_svcs.sh nginx
 src/nodes/websvcs/install_svcs.sh homepage
 src/nodes/websvcs/install_svcs.sh isso
-src/nodes/websvcs/install_svcs.sh guacd
-src/nodes/websvcs/install_svcs.sh guacamole
 src/nodes/websvcs/install_svcs.sh copyparty
+# Imports the car recordings uploaded to copyparty's /car every 15 minutes
+src/nodes/websvcs/install_svcs.sh car_ingest
 # Once the media array is mounted (pve2_storage.md)
 src/nodes/websvcs/install_svcs.sh linkding
 src/nodes/websvcs/install_svcs.sh readeck
@@ -43,14 +31,14 @@ src/nodes/websvcs/install_svcs.sh yt_to_audiobook
 # Once the GPU is set up (Hardware acceleration) and a voice is in place
 # src/nodes/websvcs/install_svcs.sh calliope
 
-# src/nodes/websvcs/install_svcs.sh go2rtc
+# src/nodes/websvcs/install_svcs.sh frigate
 # src/nodes/websvcs/install_svcs.sh piper
 # src/nodes/websvcs/install_svcs.sh whisper
 # src/nodes/websvcs/install_svcs.sh openwakeword
 
 # Once fred_api_key is in the secrets file, if ticker.rates lists FRED series
 src/nodes/websvcs/install_svcs.sh finance_exporter
-src/nodes/websvcs/install_svcs.sh fluentbit
+src/base/podman/install_svcs.sh fluentbit
 
 systemctl restart mdns_repeater
 systemctl list-units | grep Homelab
@@ -65,40 +53,8 @@ image_updater --dry-run
 ```bash
 cd /root/homelab-rendered
 src/base/debian/install_svcs.sh nvidia_gpu_exporter
-ufw allow in from 10.11.0.7 to any port 9835 proto tcp
 curl -s localhost:9835/metrics | grep nvidia_smi_temperature_gpu
 ```
-
-## Bootstrap the Guacamole admin
-
-Map an LLDAP group to a Guacamole admin group, then delete `guacadmin`.
-[Ref](https://guacamole.apache.org/doc/gug/administration.html)
-
-- In LLDAP, create the `guacamole_admin` group and add yourself to it
-- Temporarily show the password login form next to SSO
-
-```bash
-sudo su
-sed -i 's/^Environment=EXTENSION_PRIORITY=openid$/Environment=EXTENSION_PRIORITY=*, openid/' /etc/containers/systemd/guacamole.container
-systemctl daemon-reload
-systemctl restart guacamole
-```
-
-- At `https://remote.janedoe.com`, log in as `guacadmin` / `guacadmin`
-- Go to Settings >> Groups >> New Group
-  - Group name = `guacamole_admin` (must match the LLDAP group exactly)
-  - Permissions: check Administer system and all the Create boxes
-  - Save
-- Restore SSO-only login from the rendered quadlet
-
-```bash
-cd /root/homelab-rendered
-src/nodes/websvcs/install_svcs.sh guacamole
-exit
-```
-
-- Log in through Authelia and confirm that Settings >> Connections >> New Connection appears
-- Go to Settings >> Users, delete `guacadmin`
 
 ## Bootstrap the reading apps
 
@@ -128,9 +84,14 @@ sudo /root/homelab-rendered/src/nodes/secsvcs/install_svcs.sh authelia
   - Create the local admin with a long password, keep it in the password manager (OPDS readers use
     it)
   - Sign out, sign in with Authelia
-  - Collections >> New: `Articles`, `Videos`
-  - Settings >> Import: add a watch rule for `/library/books`, one for `/library/articles`
-    assigned to Articles, and one for `/library/videos` assigned to Videos. Import mode `reference`
+  - Collections >> New: `Articles`, `Videos`. Tick Public, or add each reader as a member: a
+    private collection's books are hidden from everyone else
+  - Settings >> Import: `config.json` holds the `/library/books` watch rule, with no collection,
+    and locks the default import mode to reference in place, so Calliope's and yt_to_audiobook's
+    files stay where they write them. Add a watch rule for `/library/articles` assigned to
+    Articles, and one for `/library/videos` assigned to Videos, both on import mode "Use default"
+  - Settings >> Import: scan now. A Calliope book in `readalouds/books/<Title>/` shows up in the
+    library
 - Calliope: put a ~15 s reference recording at `/etc/opt/calliope/voices/default.wav`, others as
   `<name>.wav` next to it
   - Install `calliope`; `bookmark_handoff` queues `listen` articles once its inbox exists

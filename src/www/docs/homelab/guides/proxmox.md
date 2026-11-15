@@ -16,13 +16,21 @@
 ## PVE setup
 
 - Shell in with root, password
-- Update deb repository, [src](https://it42.cc/2019/10/14/fix-proxmox-repository-is-not-signed/)
-  - `nano /etc/apt/sources.list`, add `contrib non-free non-free-firmware` to all 3 sources
-  - `nano /etc/apt/sources.list.d/pve-enterprise.list`
+- Update deb repository, [ref](https://pve.proxmox.com/wiki/Package_Repositories)
+  - `nano /etc/apt/sources.list.d/debian.sources`: every `Components:` line is
+    `main contrib non-free non-free-firmware`
 
-```text
-# deb https://enterprise.proxmox.com/debian/pve trixie pve-enterprise
-deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
+```bash
+# As root. PVE 9 lists its repos as deb822 .sources files: turn off the enterprise and Ceph ones
+sed -i '/^Types:/a Enabled: false' /etc/apt/sources.list.d/pve-enterprise.sources \
+  /etc/apt/sources.list.d/ceph.sources
+tee /etc/apt/sources.list.d/proxmox.sources > /dev/null <<'EOF'
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: trixie
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+EOF
 ```
 
 - Basic [Debian Linux setup](./debian.md)
@@ -83,7 +91,6 @@ sudo update-grub
     vfio
     vfio_iommu_type1
     vfio_pci
-    vfio_virqfd
     ```
 
   - `sudo vim /etc/modprobe.d/pve-blocklist.conf`
@@ -246,9 +253,9 @@ EOF
 ```bash
 ufw default allow routed
 ufw allow in from any to any port 22,8006,3128 proto tcp
-ufw allow in from any to any port 5900:5999 proto tcp
 ufw allow in from any to any port 111 proto udp
-# Excludes corosync and live migration ports
+# Excludes corosync, live migration and VNC (5900:5999) ports: the nodes aren't clustered, and
+# the web console goes through 8006
 ufw enable
 ```
 
@@ -344,19 +351,6 @@ src/base/debian/install_svcs.sh node_exporter
 ```bash
 # Use 192.168.4.20 on pve1, 192.168.2.20 on pve2
 ufw allow in from 192.168.4.20 to any port 9100 proto tcp
-```
-
-- Create an API user in the PVE console (for pve1, pve2 and pbs2)
-  - Go to Datacenter >> Permissions >> Users >> Add, name = api_ro
-  - Go to Permissions >> Add >> User Permission
-  - path = /, user = api_ro@pam, role = PVEAuditor, propagate = check
-  - For PBS, Permissions -> Access Control, PVEAuditor -> Audit. Store its password as
-    `pbs2_api_password`:
-
-```bash
-ssh manualadmin@pve1
-sudo su
-/root/homelab-rendered/src/nodes/pve1/secret_update.sh pve1
 ```
 
 After pve1, secsvcs and victoriametrics are set up, for pve1, pve2 and pbs2.
