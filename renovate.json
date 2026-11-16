@@ -53,6 +53,13 @@
       "groupName": "mkdocs"
     },
     {
+      "description": "MkDocs 2.0 breaks the site's plugins",
+      "matchPackageNames": [
+        "mkdocs"
+      ],
+      "allowedVersions": "<2"
+    },
+    {
       "matchPackageNames": [
         "lycheeverse/lychee"
       ],
