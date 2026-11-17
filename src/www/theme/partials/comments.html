@@ -16,7 +16,8 @@
     data-isso-reply-notifications-default-enabled="false"
     src="https://comment.bket.net/js/embed.min.js">
   </script>
-  <section id="isso-thread">
+  {# Isso's container can't fetch the page to read its title, so the first comment sends it. #}
+  <section id="isso-thread" data-title="{{ page.title | striptags }}">
     <noscript>Enable JavaScript to view comments.</noscript>
   </section>
 
