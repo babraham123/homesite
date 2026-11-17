@@ -56,3 +56,8 @@
     height: 4.5rem;
   }
 }
+
+/* Isso has no setting to drop the website field, in the post box or in reply boxes. */
+.isso-input-wrapper:has(input[name="website"]) {
+  display: none;
+}
